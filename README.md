@@ -4,6 +4,8 @@ PowerShell のオブジェクトとパイプラインを、日常の IT トラ�
 
 **v0.1.0 · 5 コース・50 レッスン · 解釈問題 20 問 · 総合演習 3 件 · 日本語 / English**
 
+[**すぐにやってみる / Play Now**](https://retiacole.github.io/powershellroom/)
+
 PowerShell のインストールやアカウント登録は不要です。配布用 HTML を保存すれば、演習をオフラインでも進められます。
 
 114 件のテストと、全 50 レッスン・12 通りの別解のブラウザー確認を実施しました。[確認記録](VALIDATION.md)を同梱しています。
@@ -18,6 +20,8 @@ PowerShell のインストールやアカウント登録は不要です。配布
 </details>
 
 ## 開き方
+
+[Web 教材を開く](https://retiacole.github.io/powershellroom/)と、ブラウザーですぐに練習できます。
 
 [powershellroom.html](powershellroom.html) を保存してブラウザーで開きます。GitHub 上では HTML のファイル画面からダウンロードして開いてください。教材の利用に PowerShell のインストール、ログイン、サーバーの起動は不要です。単一 HTML に教材・画面・シミュレーターを含みます。
 
@@ -126,6 +130,8 @@ npm run test:browser
 - [Microsoft Learn — Windows PowerShell 5.1 と PowerShell 7 の違い](https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell)
 
 ## English
+
+[**Play Now**](https://retiacole.github.io/powershellroom/) in your browser, or download the HTML for offline practice.
 
 Download the HTML and open it locally to practice offline, with no PowerShell installation or account required.
 

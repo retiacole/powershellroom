@@ -3,7 +3,7 @@
 ## 公開先
 
 - リポジトリ：[retiacole/powershellroom](https://github.com/retiacole/powershellroom)（Public）
-- Web 教材：GitHub Pages の `main` ブランチ・`/docs` を公開元に使用します。
+- Web 教材：[powershellroom を開く](https://retiacole.github.io/powershellroom/)。GitHub Pages の `main` ブランチ・`/docs` を公開元に使用します。
 - オフライン教材：リポジトリ直下の `powershellroom.html`。
 - プロフィール：windowsCLIroom と同じ「その他のプロジェクト / Other projects」に掲載する、日常 IT 操作・調査の学習教材です。
 
@@ -28,7 +28,7 @@
 3. レビュー済みの `main` を SSH で push します。
 4. Pages の公開元に `main` ブランチの `/docs` を指定します。
 5. GitHub が表示する公開 URL で、日本語・英語、コマンド入力、進捗保存、スマートフォン幅の表示を確認します。公開された HTML と配布ファイルの内容が一致することも確認します。
-6. 公開 URL が確認できてから README に「すぐにやってみる / Play Now」を追加し、未公開の表示を更新します。
+6. README の「すぐにやってみる / Play Now」と公開 URL が一致することを確認します。
 7. プロフィール側の紹介も、内容・レッスン数などが変わった場合に更新します。
 
 送信前のローカル確認：

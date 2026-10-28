@@ -24,6 +24,12 @@
 
 ブラウザーテストは一時プロファイルで実行し、普段使うブラウザーの進捗には触れていません。
 
+## 公開後の確認
+
+2026-10-28。[公開リポジトリ](https://github.com/retiacole/powershellroom)に反映し、GitHub Pages の公開元を `main` / `/docs` に設定しました。[公開ページ](https://retiacole.github.io/powershellroom/)の表示を Chrome で確認しています。公開 URL から取得した HTML は、上記のテストを実行した配布版とバイト単位で一致し、下記の SHA-256 とも一致しました。
+
+README に日英の利用リンクを追加し、[プロフィール](https://github.com/retiacole)の「その他のプロジェクト / Other projects」に windowsCLIroom と並べて掲載しました。
+
 ## 配布 HTML の SHA-256
 
 `powershellroom.html`、`docs/index.html`、`docs/powershellroom.html`：
