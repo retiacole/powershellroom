@@ -38,7 +38,14 @@
     evidenceHint: ['「やってみよう」の条件を確認してください。', 'Follow the task to collect the evidence.'], evidenceQuestion: ['結果を読んで、左の問題に答えましょう。', 'Read the output and answer the lesson question.'],
     completedTitle: ['このレッスンは完了です', 'Lesson completed'], completedText: ['次のレッスンへ進むか、この環境で練習を続けられます。', 'Continue to the next lesson or keep practicing here.'],
     recordTitle: ['完了記録あり · 復習中', 'Previously completed · Practicing again'], recordText: ['完了記録は保存されています。現在の環境で課題を再確認する場合は、条件を満たしてから「結果を確認する」を押してください。', 'Your completion record is saved. To verify this environment again, meet the task requirements and check your work.'],
-    notYet: ['もうひとつ確かめましょう', 'One more thing to check'], needCommands: ['必要な実行結果がまだそろっていません。課題のコマンドや保存先を確認してください。', 'Some evidence is still missing. Check the task, command arguments, and output file paths.'],
+    notYet: ['もうひとつ確かめましょう', 'One more thing to check'], needCommands: ['「確認項目」の未達になっている操作や結果を確かめましょう。パイプは一続きで、確認と変更は指定された順番で実行します。', 'Review the pending items in Requirements. Connect pipeline stages in one command and perform observations and changes in the required order.'],
+    requirements: ['確認項目', 'Requirements'], requirementMet: ['確認済み', 'Met'], requirementPending: ['未達', 'Pending'],
+    requirementPipeline: ['パイプでつなぐ', 'Connect in one pipeline'], requirementPipelineNote: ['各段を | でつなぎ、一続きの処理として完了させます。', 'Join the stages with | and complete them as one pipeline.'],
+    requirementAlternatives: ['別の書式も使えます', 'Alternative forms are accepted'], requirementOr: ['または', 'or'],
+    requirementOrder: ['指定された順番で実行', 'Run in the required order'], requirementOrderNote: ['変更をやり直した場合は、その後にもう一度状態を確認します。', 'If you repeat a change, check the state again afterwards.'],
+    requirementStep: ['手順', 'Step'], requirementResult: ['結果', 'Result'], requirementError: ['指定されたエラーを観察', 'Observe the expected error'],
+    requirementNoArgs: ['引数なし', 'No arguments'], requirementOutputCount: ['出力件数', 'Output count'],
+    requirementFile: ['指定内容をファイルに保存', 'Save the required contents to the file'], requirementLocation: ['現在地', 'Current location'], requirementState: ['課題で指定された状態になっている', 'The environment is in the required state'],
     needAnswer: ['コマンドの条件は満たしています。結果が何を示すか、選択肢を確認してください。', 'The command requirements are met. Revisit what the output actually tells you and choose an answer.'],
     wrongAttempts: ['この環境での誤答回数', 'Incorrect answers in this environment'], choiceFeedback: ['選んだ答えについて', 'About your answer'],
     unreadableProgress: ['保存済みの進捗を読み込めなかったため、自動保存を停止しています。「進捗を保存」から元のデータを書き出せます。有効な進捗を読み込むか、学習データを消すと自動保存を再開します。', 'Saved progress could not be read, so autosave is paused to preserve it. Download the original data from Save progress. Import valid progress or erase learning data to resume autosave.'],
@@ -59,7 +66,7 @@
     scenario: ['環境を選ぶ', 'Choose a scenario'], scenarioNote: ['切り替えると、練習室の履歴と仮想ファイルを初期化します。', 'Switching resets the playground’s history and virtual files.'],
     ready: ['準備できています', 'Ready to explore'], savedDetail: ['オフラインで利用できます。進捗はこのブラウザだけに保存されます。配布HTMLは変更しません。', 'Works offline. Progress stays in this browser; the distributed HTML file is not modified.'],
     noCandidates: ['補完候補がありません。', 'No completion candidates.'],
-    about: ['教材について', 'About this room'], aboutText: ['powershellroom v0.1.0 · 日本語 / English\nWindows 11上のPowerShell 7系を題材に、オブジェクト・パイプ・CSVと日常のIT調査を学ぶ教材です。windowsCLIroomの画面と進め方を引き継いでいます。', 'powershellroom v0.1.0 · 日本語 / English\nLearn PowerShell 7 objects, pipelines, CSV reports and everyday Windows troubleshooting. Built on the layout and learning flow of windowsCLIroom.']
+    about: ['教材について', 'About this room'], aboutText: ['powershellroom v0.1.1 · 日本語 / English\nWindows 11上のPowerShell 7系を題材に、オブジェクト・パイプ・CSVと日常のIT調査を学ぶ教材です。windowsCLIroomの画面と進め方を引き継いでいます。', 'powershellroom v0.1.1 · 日本語 / English\nLearn PowerShell 7 objects, pipelines, CSV reports and everyday Windows troubleshooting. Built on the layout and learning flow of windowsCLIroom.']
   };
   let state = Engine.empty(), view = 'home', currentId = '', composing = false, historyCursor = -1, historyDraft = '';
   let saveTimer, toastTimer, feedback = null, courseSearch = '', courseOpen = false, unreadableProgress = null;
@@ -176,11 +183,52 @@ PC-032  5</pre></div><div class="sample-note"><strong>${t('clueTitle')}</strong>
     if (!$('file-list')) return;
     $('file-list').innerHTML = Shell.listFiles(cp().session).filter(f => !f.dir).sort((a, b) => a.path.localeCompare(b.path)).map(f => `<div class="file-row"><span class="file-name">${escape(f.path)}</span><button data-read="${escape(f.path)}">${t('read')}</button><button data-path="${escape(f.path)}">${t('insert')}</button></div>`).join('');
   }
+  function requirementCommand(check) {
+    if (check.anyOf) return check.anyOf.map(requirementCommand).join(`<span class="requirement-or">${t('requirementOr')}</span>`);
+    const references = [...(Shell.reference || []), ...(globalThis.PSRNetwork?.reference || [])];
+    const name = references.find(ref => ref.name.toLowerCase() === check.name)?.name ||
+      String(check.name || '').replace(/^\$psversiontable/i,'$PSVersionTable').replace(/\.psversion$/i,'.PSVersion');
+    const values = value => value === undefined ? [] : Array.isArray(value) ? value : [value];
+    const fragments = [...new Set([...values(check.paths), ...values(check.argsEqual === undefined ? check.contains : check.argsEqual)].map(String))];
+    const notes = [];
+    if (check.argsEqual?.length === 0) notes.push(t('requirementNoArgs'));
+    if (check.expectCode) notes.push(t('requirementError'));
+    if (check.outputCount !== undefined) notes.push(`${t('requirementOutputCount')}: ${check.outputCount}`);
+    if (check.outputIncludes?.length) notes.push(`${t('requirementResult')}: ${values(check.outputIncludes).join(' / ')}`);
+    if (check.objectIncludes) notes.push(`${t('requirementResult')}: ${values(check.objectIncludes).flatMap(object=>Object.entries(object).map(([key,value])=>`${key} = ${value}`)).join(' / ')}`);
+    return `<span class="requirement-command"><code>${escape(name)}</code>${fragments.length ? `<span class="requirement-fragments">${fragments.map(fragment=>`<code>${escape(loc(fragment))}</code>`).join(' ')}</span>` : ''}${notes.length ? `<span class="requirement-note">${escape(loc(notes.join(' · ')))}</span>` : ''}</span>`;
+  }
+  function renderRequirements(l, result) {
+    const checks = l.verify || {}, rows = [];
+    const marker = met => `<span class="requirement-state ${met ? 'met' : 'pending'}"><span aria-hidden="true">${met ? '✓' : '○'}</span> ${t(met ? 'requirementMet' : 'requirementPending')}</span>`;
+    const row = (kind, index, met, body) => `<li class="requirement" data-kind="${kind}" data-index="${index}" data-met="${met ? 'true' : 'false'}"><div class="requirement-main">${marker(met)}<div class="requirement-description">${body}</div></div></li>`;
+    (checks.commands || []).forEach((check,index)=>rows.push(row('command',index,result.commands[index],requirementCommand(check))));
+    (checks.pipelines || []).forEach((check,index)=>{
+      const alternatives = Array.isArray(check) ? [check] : check.anyOf;
+      const progress = result.pipelineStages?.[index];
+      const selected = Math.min(alternatives.length-1,Math.max(0,progress?.alternative || 0));
+      const pipeline = alternatives[selected];
+      const stages = pipeline.map((stage,i)=>{
+        const met = result.pipelines[index] || progress?.stages[i] === true;
+        return `<li class="pipeline-step" data-stage="${i}" data-met="${met ? 'true' : 'false'}">${marker(met)}${requirementCommand(stage)}</li>`;
+      }).join('');
+      const otherForms = alternatives.length > 1 ? `<details class="requirement-alternatives"><summary>${t('requirementAlternatives')}</summary><ul>${alternatives.map(alternative=>`<li>${alternative.map(requirementCommand).join('<span class="requirement-pipe">|</span>')}</li>`).join('')}</ul></details>` : '';
+      rows.push(row('pipeline',index,result.pipelines[index],`<span>${t('requirementPipeline')}</span><p class="requirement-note">${t('requirementPipelineNote')}</p><ol class="pipeline-steps">${stages}</ol>${otherForms}`));
+    });
+    if (checks.orderedCommands?.length) {
+      const steps = checks.orderedCommands.map((check,index)=>row('ordered',index,index < (result.orderedCount || 0),`<span class="requirement-step">${t('requirementStep')} ${index+1}</span>${requirementCommand(check)}`)).join('');
+      rows.push(`<li class="requirement-order"><p>${t('requirementOrder')}</p>${checks.orderedCommands.some(check=>check.restartOnRepeat) ? `<p class="requirement-note">${t('requirementOrderNote')}</p>` : ''}<ol>${steps}</ol></li>`);
+    }
+    (checks.files || []).forEach((file,index)=>rows.push(row('file',index,result.files[index],`${t('requirementFile')}<code class="requirement-path">${escape(loc(file.path))}</code>`)));
+    if (checks.cwd) rows.push(row('location',0,result.cwd,`${t('requirementLocation')}<code class="requirement-path">${escape(loc(checks.cwd))}</code>`));
+    if (Object.keys(checks.state || {}).length) rows.push(row('state',0,result.stateOk,t('requirementState')));
+    return `<section class="requirement-panel" aria-label="${t('requirements')}"><h3>${t('requirements')}</h3><ul class="requirements">${rows.join('')}</ul></section>`;
+  }
   function renderStatus() {
     if (!$('evidence')) return;
     const l = lesson(), result = l ? Engine.grade(l, cp().session, cp().answer, cp().evidence) : null;
     const done = l && !!state.completed[l.id];
-    $('evidence').innerHTML = `<div><strong class="${result?.commandOk ? 'ready' : ''}">${!l ? t('ready') : result.ok ? `✓ ${t('completedTitle')}` : done ? t('recordTitle') : result.commandOk ? `✓ ${t('evidenceReady')}` : t('evidencePending')}</strong><span class="subtle">${!l ? t('saved') : result.ok ? t('completedText') : done ? t('recordText') : result.commandOk && l.question ? t('evidenceQuestion') : t('evidenceHint')}</span></div>`;
+    $('evidence').innerHTML = `<div><strong class="${result?.commandOk ? 'ready' : ''}">${!l ? t('ready') : result.ok ? `✓ ${t('completedTitle')}` : done ? t('recordTitle') : result.commandOk ? `✓ ${t('evidenceReady')}` : t('evidencePending')}</strong><span class="subtle">${!l ? t('saved') : result.ok ? t('completedText') : done ? t('recordText') : result.commandOk && l.question ? t('evidenceQuestion') : t('evidenceHint')}</span></div>${l ? renderRequirements(l,result) : ''}`;
     if (!l) return;
     const f = $('feedback');
     if (done && result.ok) f.innerHTML = `<div class="feedback success"><strong>✓ ${t('completedTitle')}</strong><p>${escape(loc(l.success))}</p>${l.question ? `<p style="margin-top:8px">${escape(loc(l.question.explanation))}</p>` : ''}</div>`;

@@ -24,13 +24,17 @@
 
 .check-actions{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-top:15px}.check-actions #lesson-reset{font-size:12px}
 
+/* Evidence stays visible while a learner works through each requirement. */
+.clue-status{display:block}.requirement-panel{margin-top:12px;padding-top:12px;border-top:1px solid var(--line)}.requirement-panel h3{font-size:12px;margin:0 0 8px}.requirements,.requirement-order>ol,.pipeline-steps,.requirement-alternatives ul{list-style:none;margin:0;padding:0}.requirement{padding:7px 0;border-top:1px solid #edf1f6}.requirement:first-child{border-top:0}.requirement-main,.pipeline-step{display:flex;gap:9px;align-items:flex-start;min-width:0}.requirement-state{flex:none;min-width:58px;font-size:10px;line-height:1.9;white-space:nowrap}.requirement-state.met{color:var(--green)}.requirement-state.pending{color:var(--amber)}.requirement-description,.requirement-command{min-width:0;overflow-wrap:anywhere}.requirement-command{display:block}.requirement-command code{font-size:10px;white-space:normal;overflow-wrap:anywhere}.requirement-fragments{display:block;margin-top:3px}.requirement-fragments code{display:inline-block;background:#f2f5fa;margin:1px 2px 1px 0}.requirement-note{display:block;color:var(--muted);font-size:10px;line-height:1.7;margin:4px 0 0}.pipeline-steps{margin-top:8px;padding-left:9px;border-left:2px solid var(--line)}.pipeline-step{margin:7px 0}.pipeline-step .requirement-state{min-width:50px}.requirement-order{margin:9px 0 4px;padding-top:9px;border-top:1px solid var(--line)}.requirement-order>p:first-child{font-weight:650;margin-bottom:3px}.requirement-order>ol{margin-top:5px}.requirement-step{display:block;color:var(--muted);font-size:10px;margin-bottom:3px}.requirement-path{display:block;font-size:10px;overflow-wrap:anywhere;margin-top:4px}.requirement-alternatives{margin-top:8px;color:var(--muted)}.requirement-alternatives summary{cursor:pointer;font-size:10px}.requirement-alternatives li{padding:8px 0;border-top:1px solid var(--line)}.requirement-alternatives li:first-child{margin-top:6px}.requirement-pipe{display:block;color:var(--muted);font-family:var(--mono);margin:3px 0}.requirement-or{display:block;color:var(--muted);font-size:10px;margin:4px 0}
+@media(max-width:700px){.requirement-main{gap:7px}.requirement-state{min-width:52px}.pipeline-steps{padding-left:6px}.pipeline-step{gap:6px}.pipeline-step .requirement-state{min-width:46px}}
+
 .ps-brand-mark{background:var(--blue);color:white;display:grid;place-items:center;width:33px;height:29px;border-radius:6px;font:700 19px var(--mono);letter-spacing:-3px;padding-right:4px}.object-sample{margin-top:18px;color:#a7dce4}.object-flow{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:12px 0;padding:10px;border:1px solid var(--line);background:var(--blue-soft);font:12px var(--mono);overflow-wrap:anywhere}.object-flow span{min-width:0}.object-details{margin-top:14px}.object-details summary{color:var(--blue);cursor:pointer;margin-bottom:9px}
 </style>
 </head>
 <body>
   <a class="skip" href="#main">本文へ / Skip to content</a>
   <header class="topbar">
-    <button id="brand" class="brand" aria-label="powershellroom home"><span class="ps-brand-mark" aria-hidden="true">&gt;_</span><span>power<span class="brand-cli">shell</span>room</span><span class="version">0.1.0</span></button>
+    <button id="brand" class="brand" aria-label="powershellroom home"><span class="ps-brand-mark" aria-hidden="true">&gt;_</span><span>power<span class="brand-cli">shell</span>room</span><span class="version">0.1.1</span></button>
     <nav aria-label="Main"><button id="home-button" class="nav-button"></button><button id="sandbox-button" class="nav-button"></button><button id="reference-button" class="nav-button"></button><button id="language-button" class="language" lang="en">EN</button><button id="menu-button" class="menu-button" aria-label="Settings / 設定">☰</button></nav>
   </header>
   <div id="storage-warning" class="notice warning" role="status" hidden></div>
@@ -54,12 +58,20 @@
   const success = (items = [], type = 'System.Object', extra = {}) => ({ items: clone(items), type, error: '', code: 0, effects: [], ...extra });
   const failure = message => ({ items: [], type: 'System.Object', error: message, code: 1, effects: [] });
   function unsupported(message) { throw new Error('[Simulator] ' + message); }
-  function options(args, values = [], switches = [], positional) {
-    const result = Object.create(null), valueSet = new Set(values), switchSet = new Set(switches);
+  function options(args, values = [], switches = [], positional, aliases = {}) {
+    const result = Object.create(null), switchSet = new Set(switches);
+    const parameters = [...values, ...switches, ...Object.keys(aliases)];
     for (let i = 0; i < args.length; i++) {
-      const token = args[i], name = token.toLowerCase().replace(/^-/, '');
+      const token = args[i];
       if (token.startsWith('-')) {
-        if (!valueSet.has(name) && !switchSet.has(name)) unsupported('Unsupported parameter: ' + token + '. See Get-Help for the supported form.');
+        const entered = token.slice(1).toLowerCase();
+        const matches = parameters.includes(entered) ? [entered] : parameters.filter(name => name.startsWith(entered));
+        if (matches.length > 1) unsupported('Parameter ' + token + ' is ambiguous. Use one of: ' + matches.map(name => '-' + name).join(', ') + '.');
+        if (!entered || !matches.length) unsupported('Unsupported parameter: ' + token + '. See Get-Help for the supported form.');
+        const name = aliases[matches[0]] || matches[0];
+        // Share the canonical name with the shell trace so equivalent inputs
+        // collect the same grading evidence, while retaining the typed command.
+        args[i] = '-' + name;
         if (own(result, name)) unsupported('Parameter specified more than once: ' + token);
         if (switchSet.has(name)) result[name] = true;
         else {
@@ -68,7 +80,7 @@
           result[name] = value;
         }
       } else {
-        if (!positional || own(result, positional)) unsupported('Unexpected argument: ' + token);
+        if (!positional || own(result, positional)) unsupported("A positional parameter cannot be found that accepts argument '" + token + "'. Put paths or text containing spaces in quotes.");
         result[positional] = token;
       }
     }
@@ -82,17 +94,62 @@
     const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
     return new RegExp('^' + escaped + '$', 'i').test(value);
   }
+  // A compact fictional snapshot with repeated names for grouping and PID
+  // selection. Keep the original three processes first for saved-state checks.
+  const backgroundProcesses = [
+    [1120, 'svchost', 4, 24, 320, 0], [1364, 'svchost', 6, 40, 480, 0],
+    [1548, 'svchost', 1, 32, 260, 0], [1704, 'svchost', 0.5, 16, 180, 0],
+    [1896, 'svchost', 3.5, 56, 510, 0],
+    [7220, 'msedge', 7.5, 160, 920, 1], [7364, 'msedge', 2.25, 96, 340, 1],
+    [7508, 'msedge', 0.75, 64, 220, 1], [7652, 'msedge', 4.25, 32, 280, 1],
+    [8040, 'Teams', 9, 180, 740, 1], [8220, 'OneDrive', 1.25, 72, 310, 1]
+  ];
+  const processDetails = {
+    4320: { HandleCount: 240, SessionId: 1, Path: 'C:\\Program Files\\NotesApp\\NotesApp.exe', StartTime: '2026-10-28T08:45:00+09:00', Responding: true },
+    2080: { HandleCount: 850, SessionId: 1, Path: 'C:\\Windows\\explorer.exe', StartTime: '2026-10-28T08:31:00+09:00', Responding: true },
+    6040: { HandleCount: 160, SessionId: 1, Path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', StartTime: '2026-10-28T09:00:00+09:00', Responding: true },
+    ...Object.fromEntries(backgroundProcesses.map(([Id, ProcessName, , , HandleCount, SessionId], index) => [Id, {
+      HandleCount, SessionId, Responding: true,
+      Path: { svchost: 'C:\\Windows\\System32\\svchost.exe', msedge: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        Teams: 'C:\\Program Files\\Teams\\Teams.exe', OneDrive: 'C:\\Users\\Learner\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe' }[ProcessName],
+      StartTime: '2026-10-28T08:' + String(32 + index).padStart(2, '0') + ':00+09:00'
+    }]))
+  };
+  function enrichProcess(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    // Fill older snapshots without replacing values captured at query time.
+    // This only enriches a returned object; it never changes live PC state.
+    const enriched = { ...processDetails[item.Id], ...item };
+    if (own(enriched, 'ProcessName')) enriched.Name = enriched.ProcessName;
+    if (own(enriched, 'HandleCount')) enriched.Handles = enriched.HandleCount;
+    if (own(enriched, 'SessionId')) enriched.SI = enriched.SessionId;
+    if (own(enriched, 'WorkingSet64')) enriched.WS = enriched.WorkingSet64;
+    return enriched;
+  }
   function createState(scenario = 'base') {
     return {
       processes: [
         { Id: 4320, ProcessName: 'NotesApp', CPU: 125, WorkingSet64: 314572800 },
         { Id: 2080, ProcessName: 'explorer', CPU: 8, WorkingSet64: 157286400 },
-        { Id: 6040, ProcessName: 'pwsh', CPU: 2, WorkingSet64: 83886080 }
+        { Id: 6040, ProcessName: 'pwsh', CPU: 2, WorkingSet64: 83886080 },
+        ...backgroundProcesses.map(([Id, ProcessName, CPU, memoryMB]) => ({ Id, ProcessName, CPU, WorkingSet64: memoryMB * 1048576 }))
       ],
       services: [
         { Status: scenario === 'service-stopped' ? 'Stopped' : 'Running', Name: 'Spooler', DisplayName: 'Print Spooler', StartType: 'Automatic' },
         { Status: 'Running', Name: 'Dnscache', DisplayName: 'DNS Client', StartType: 'Automatic' },
-        { Status: 'Stopped', Name: 'RemoteRegistry', DisplayName: 'Remote Registry', StartType: 'Disabled' }
+        { Status: 'Stopped', Name: 'RemoteRegistry', DisplayName: 'Remote Registry', StartType: 'Disabled' },
+        { Status: 'Running', Name: 'Audiosrv', DisplayName: 'Windows Audio', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'EventLog', DisplayName: 'Windows Event Log', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'LanmanWorkstation', DisplayName: 'Workstation', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'Winmgmt', DisplayName: 'Windows Management Instrumentation', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'W32Time', DisplayName: 'Windows Time', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'wuauserv', DisplayName: 'Windows Update', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'BITS', DisplayName: 'Background Intelligent Transfer Service', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'WinRM', DisplayName: 'Windows Remote Management (WS-Management)', StartType: 'Manual' },
+        { Status: 'Running', Name: 'Themes', DisplayName: 'Themes', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'WSearch', DisplayName: 'Windows Search', StartType: 'Automatic' },
+        { Status: 'Stopped', Name: 'TermService', DisplayName: 'Remote Desktop Services', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'TrustedInstaller', DisplayName: 'Windows Modules Installer', StartType: 'Manual' }
       ]
     };
   }
@@ -109,16 +166,16 @@
   const ref = (name, syntax, summaryJa, summaryEn) => ({ name, syntax, summaryJa, summaryEn });
   const reference = [
     ref('Get-Process', 'Get-Process [[-Name] pattern]\nGet-Process -Id id', '実行中プロセスの名前・PID・累積 CPU 時間・メモリを取得。', 'Get process names, IDs, cumulative CPU time, and memory.'),
-    ref('Stop-Process', 'Stop-Process [-Id] 4320 [-WhatIf]\nGet-Process -Id 4320 | Stop-Process [-WhatIf]', '演習用 NotesApp の停止。-WhatIf は操作の予告だけです。', 'Stop the practice NotesApp. -WhatIf previews without stopping it.'),
+    ref('Stop-Process', 'Stop-Process [-Id] 4320 [-WhatIf]\nStop-Process -Name NotesApp [-WhatIf]\nGet-Process -Id 4320 | Stop-Process [-WhatIf]', '演習用 NotesApp を ID・名前・パイプで指定して停止。-WhatIf は操作の予告だけです。', 'Stop the practice NotesApp by ID, name, or pipeline. -WhatIf previews without stopping it.'),
     ref('Get-Service', 'Get-Service [[-Name] pattern]', 'サービスの現在状態と起動設定を取得。', 'Read service state and startup settings.'),
     ...['Start-Service', 'Stop-Service', 'Restart-Service'].map(name => ref(name, name + ' [-Name] Spooler [-WhatIf]', '演習用 Spooler の状態変更。実機では権限と影響の確認が必要です。', 'Change the practice Spooler state. Real use requires permission and impact checks.')),
     ref('Get-CimInstance', 'Get-CimInstance [-ClassName] Win32_OperatingSystem|Win32_LogicalDisk|Win32_ComputerSystem', 'OS・ディスク容量・PC とドメインの情報を取得。', 'Read operating system, disk capacity, and computer/domain information.'),
-    ref('Get-WinEvent', 'Get-WinEvent -LogName System [-MaxEvents count]', 'System ログを新しい順に取得。ログの時刻と現在状態を区別します。', 'Read System events newest first. Distinguish past events from current state.'),
+    ref('Get-WinEvent', 'Get-WinEvent [-LogName] System [-MaxEvents count]', 'System ログを新しい順に取得。件数省略時は教材の全 12 件を返します。実機では大量になるため -MaxEvents で件数を絞ります。', 'Read System events newest first. Omitting the limit returns all 12 practice events; use -MaxEvents to limit large real-world logs.'),
     ref('Get-NetIPConfiguration', 'Get-NetIPConfiguration', 'IP アドレス・ゲートウェイ・DNS を取得。Windows の NetTCPIP を想定。', 'Read IP, gateway, and DNS configuration using the Windows NetTCPIP module.'),
     ref('Get-NetAdapter', 'Get-NetAdapter', '仮想 Ethernet アダプターの接続状態を取得。', 'Read the simulated Ethernet adapter state.'),
     ref('Get-DnsClientServerAddress', 'Get-DnsClientServerAddress', 'アダプターの DNS サーバー設定を取得。', 'Read adapter DNS server settings.'),
     ref('Resolve-DnsName', 'Resolve-DnsName [-Name] host [-Server 10.20.0.10]', '登録済みホストの IPv4 アドレスを照会。', 'Query the IPv4 address of a registered host.'),
-    ref('Test-Connection', 'Test-Connection [-TargetName] host [-Count 1..10] [-Quiet]', 'ICMP による疎通。-Quiet は真偽値を返します。PowerShell 7 の書式です。', 'Check ICMP reachability. -Quiet returns a Boolean. Uses PowerShell 7 syntax.'),
+    ref('Test-Connection', 'Test-Connection [-TargetName] host [-Count 1..10] [-Quiet]\nTest-Connection -ComputerName host [-Count 1..10] [-Quiet]', 'ICMP による疎通。-Quiet は真偽値を返します。-ComputerName は -TargetName の別名です。', 'Check ICMP reachability. -Quiet returns a Boolean. -ComputerName is an alias for -TargetName.'),
     ref('Test-NetConnection', 'Test-NetConnection [-ComputerName] host [-Port 1..65535]', '指定 TCP ポートまたは ICMP の疎通を確認。アプリの正常動作は別の確認です。', 'Check a TCP port or ICMP reachability. Application health is a separate check.'),
     ref('Get-NetTCPConnection', 'Get-NetTCPConnection [-State Listen|Established]', '接続状態・ポート・所有プロセスを取得。', 'Read TCP state, ports, and owning process IDs.'),
     ref('Get-NetRoute', 'Get-NetRoute [-DestinationPrefix prefix]', '仮想 PC の経路を表示。', 'Read routes on the virtual PC.'),
@@ -138,24 +195,35 @@
         const id = p.id === undefined ? null : integer(p.id, 1, 2147483647, '-Id');
         const found = pc.processes.filter(item => id !== null ? item.Id === id : p.name ? wildcard(item.ProcessName, p.name) : true);
         if (!found.length && (p.id || (p.name && !/[?*]/.test(p.name)))) return failure('Cannot find a process matching ' + (p.id || p.name) + '.');
-        const details = {
-          4320: { Path: 'C:\\Program Files\\NotesApp\\NotesApp.exe', StartTime: '2026-10-28T08:45:00+09:00', Responding: true },
-          2080: { Path: 'C:\\Windows\\explorer.exe', StartTime: '2026-10-28T08:31:00+09:00', Responding: true },
-          6040: { Path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', StartTime: '2026-10-28T09:00:00+09:00', Responding: true }
-        };
         // Derived properties keep existing saved PC-state snapshots compatible.
-        return success(found.map(item => ({ ...item, ...details[item.Id] })), 'System.Diagnostics.Process');
+        return success(found.map(enrichProcess), 'System.Diagnostics.Process');
       }
       if (name === 'stop-process') {
-        const p = options(args, ['id'], ['whatif'], 'id');
-        const ids = p.id === undefined ? incoming.map(item => item?.Id) : [integer(p.id, 1, 2147483647, '-Id')];
-        if (!ids.length || ids.some(id => !Number.isInteger(id))) unsupported('Specify -Id 4320 or pipe a process object.');
+        const p = options(args, ['id', 'name'], ['whatif'], 'id');
+        if (p.id !== undefined && p.name !== undefined) unsupported('Use either -Name or -Id.');
+        const resolveNames = names => names.flatMap(pattern => {
+          const found = pc.processes.filter(item => wildcard(item.ProcessName, pattern));
+          if (!found.length && !/[?*]/.test(pattern)) throw new Error('Cannot find a process with the name "' + pattern + '". Verify the process name and call the cmdlet again.');
+          return found.map(item => item.Id);
+        });
+        let ids;
+        if (p.id !== undefined) ids = [integer(p.id, 1, 2147483647, '-Id')];
+        else if (p.name !== undefined) ids = resolveNames([p.name]);
+        else if (incoming.length && incoming.every(item => item && !own(item, 'Id') && typeof item.Name === 'string' && item.Name)) ids = resolveNames(incoming.map(item => item.Name));
+        else {
+          ids = incoming.map(item => item?.Id);
+          if (!ids.length || ids.some(id => !Number.isInteger(id))) unsupported('Specify -Id 4320, -Name NotesApp, or pipe a process object.');
+        }
         if (ids.some(id => id !== 4320)) unsupported('Only the practice NotesApp (PID 4320) can be stopped.');
-        const target = pc.processes.find(item => item.Id === 4320);
-        if (!target) return failure('Cannot find a process with the process identifier 4320.');
-        if (p.whatif) return success([], 'System.Object', { output: 'What if: Performing the operation "Stop-Process" on target "NotesApp (4320)".' });
-        pc.processes = pc.processes.filter(item => item.Id !== 4320);
-        return success([], 'System.Object', { effects: ['process:4320:stopped'] });
+        const targetObjects = [...new Set(ids)].map(id => {
+          const target = pc.processes.find(item => item.Id === id);
+          if (!target) throw new Error('Cannot find a process with the process identifier ' + id + '.');
+          return { Id: target.Id, ProcessName: target.ProcessName };
+        });
+        if (p.whatif) return success([], 'System.Object', { targetObjects,
+          output: targetObjects.map(target => 'What if: Performing the operation "Stop-Process" on target "' + target.ProcessName + ' (' + target.Id + ')".').join('\n') });
+        pc.processes = pc.processes.filter(item => !ids.includes(item.Id));
+        return success([], 'System.Object', { targetObjects, effects: targetObjects.map(target => 'process:' + target.Id + ':stopped') });
       }
       if (name === 'get-service') {
         const p = options(args, ['name'], [], 'name');
@@ -185,13 +253,20 @@
         }
       }
       if (name === 'get-winevent') {
-        const p = options(args, ['logname', 'maxevents']);
+        const p = options(args, ['logname', 'maxevents'], [], 'logname');
         if (String(p.logname).toLowerCase() !== 'system') unsupported('Use -LogName System. Other logs are not simulated.');
-        const limit = p.maxevents === undefined ? 3 : integer(p.maxevents, 1, 100, '-MaxEvents');
+        const limit = p.maxevents === undefined ? Infinity : integer(p.maxevents, 1, 100, '-MaxEvents');
         const events = [
           { TimeCreated: scenario === 'service-stopped' ? '2026-10-28T09:08:00+09:00' : '2026-10-28T09:10:00+09:00', Id: 7036, LevelDisplayName: 'Information', ProviderName: 'Service Control Manager', Message: 'The Print Spooler service entered the ' + (scenario === 'service-stopped' ? 'stopped' : 'running') + ' state.' },
           { TimeCreated: '2026-10-28T09:08:00+09:00', Id: 7031, LevelDisplayName: 'Error', ProviderName: 'Service Control Manager', Message: 'The Print Spooler service terminated unexpectedly. It has done this 1 time(s). [Fictional excerpt; recovery action details omitted.]' },
-          { TimeCreated: '2026-10-28T09:00:00+09:00', Id: 6005, LevelDisplayName: 'Information', ProviderName: 'EventLog', Message: 'The Event log service was started.' }
+          { TimeCreated: '2026-10-28T09:00:00+09:00', Id: 6005, LevelDisplayName: 'Information', ProviderName: 'EventLog', Message: 'The Event log service was started.' },
+          ...[
+            ['08:58', 'Windows Search', 'running'], ['08:54', 'Background Intelligent Transfer Service', 'stopped'],
+            ['08:52', 'Windows Update', 'stopped'], ['08:48', 'Windows Audio', 'running'],
+            ['08:43', 'Themes', 'running'], ['08:39', 'Windows Management Instrumentation', 'running'],
+            ['08:36', 'DNS Client', 'running'], ['08:34', 'Workstation', 'running'], ['08:31', 'Windows Event Log', 'running']
+          ].map(([time, service, state]) => ({ TimeCreated: '2026-10-28T' + time + ':00+09:00', Id: 7036,
+            LevelDisplayName: 'Information', ProviderName: 'Service Control Manager', Message: 'The ' + service + ' service entered the ' + state + ' state. [Fictional excerpt.]' }))
         ];
         return success(events.slice(0, limit), 'System.Diagnostics.Eventing.Reader.EventLogRecord');
       }
@@ -215,7 +290,7 @@
         return success([{ Name: target.name, Type: 'A', TTL: 300, Section: 'Answer', IPAddress: target.address }], 'Microsoft.DnsClient.Commands.DnsRecord_A');
       }
       if (name === 'test-connection') {
-        const p = options(args, ['targetname', 'count'], ['quiet'], 'targetname');
+        const p = options(args, ['targetname', 'count'], ['quiet'], 'targetname', { computername: 'targetname' });
         if (!p.targetname) unsupported('A target name is required.');
         const count = p.count === undefined ? 4 : integer(p.count, 1, 10, '-Count');
         const target = addressFor(p.targetname, scenario);
@@ -279,7 +354,7 @@
       return null;
     } catch (error) { return failure(error.message || '[Simulator] The command could not be completed.'); }
   }
-  return { createState, execute, reference, scenarios };
+  return { createState, enrichProcess, execute, reference, scenarios };
 });
 
 ;
@@ -322,13 +397,13 @@
     ['Group-Object','項目の値でまとめる','Group by a property','command | Group-Object [-Property] property'],
     ['ForEach-Object','各オブジェクトの項目を取り出す','Project one property from each object','command | ForEach-Object { $_.Name }'],
     ['Format-Table','表として表示','Format a display table','command | Format-Table [-Property Name,Length] [-AutoSize]'],
-    ['Format-List','縦に項目を表示','Format a display list','command | Format-List [-Property Name,Length]'],
+    ['Format-List','縦に項目を表示','Format a display list','command | Format-List [-Property Name,Length]\ncommand | Format-List *'],
     ['Out-File','表示用テキストを保存','Save formatted text','command | Out-File -FilePath path [-Encoding utf8] [-Append] [-WhatIf]'],
     ['Export-Csv','オブジェクトをCSVへ保存','Save objects as CSV','command | Export-Csv -Path path -NoTypeInformation [-Encoding utf8] [-WhatIf]'],
     ['Import-Csv','CSVをオブジェクトとして読む','Read CSV as objects','Import-Csv [-Path] path'],
     ['ConvertTo-Json','JSON文字列に変換','Convert objects to JSON','command | ConvertTo-Json [-Depth n]'],
     ['ConvertFrom-Json','JSONからオブジェクトへ','Parse JSON into objects','Get-Content path -Raw | ConvertFrom-Json'],
-    ['Select-String','テキストから文字列を探す','Find literal text in lines','Select-String -Path path -Pattern text -SimpleMatch'],
+    ['Select-String','テキストから文字列を探す','Find literal text in lines','Select-String [-Pattern] text [-Path] path [-SimpleMatch]'],
     ['Write-Output','値をパイプラインに送る','Send values to the pipeline','Write-Output value'],
     ['Clear-Host','端末の表示を消す','Clear the terminal display','Clear-Host']
   ];
@@ -359,9 +434,12 @@
     if (stream.type === 'PSR.FormatData') return items.map(x=>x.Text).join('\n');
     if (!items.length) return '';
     if (!items.every(plain)) return items.map(scalar).join('\n');
+    if (columns?.includes('*')) columns=[...new Set(columns.flatMap(k=>k==='*'?items.flatMap(x=>Object.keys(x)):[k]))];
+    if (!columns && style==='list' && stream.type==='System.Diagnostics.Process') columns=['Id','Handles','CPU','SI','Name'];
     if (!columns && (style==='default'||style==='table')) {
       if (stream.type==='System.ServiceProcess.ServiceController') columns=['Status','Name','DisplayName'];
       if (stream.type==='System.Diagnostics.Process') columns=['Id','ProcessName','CPU','WorkingSet64'];
+      if (/^System\.IO\.(?:FileInfo|DirectoryInfo|FileSystemInfo)$/.test(stream.type)) columns=['Mode','LastWriteTime','Length','Name'];
     }
     if (style==='default') {
       if (stream.type==='NetTCPIP.TestNetConnectionResult') style='list';
@@ -407,7 +485,8 @@
     const par=parentPath(path); if (par===path) return;
     if (!get(s,par)) { ensureParents(s,par); s.files[par.toLowerCase()]={path:par,dir:true,content:''}; }
   }
-  function fileObject(f) { return {Mode:f.dir?'d----':'-a---',Name:basename(f.path),Length:f.dir?null:byteLength(f.content),FullName:f.path,Extension:f.dir?'':(basename(f.path).match(/\.[^.]+$/)||[''])[0],PSIsContainer:f.dir}; }
+  const seedTime = path => /archive\.log$/i.test(path)?'2026-10-21T00:00:00.000Z':/app\.log$/i.test(path)?'2026-10-28T00:10:00.000Z':/notes\.txt$/i.test(path)?'2026-10-28T00:05:00.000Z':'2026-10-28T00:00:00.000Z';
+  function fileObject(f) { return {Mode:f.dir?'d----':'-a---',LastWriteTime:f.lastWriteTime||seedTime(f.path),Name:basename(f.path),...(!f.dir?{Length:byteLength(f.content)}:{}),FullName:f.path,Extension:f.dir?'':(basename(f.path).match(/\.[^.]+$/)||[''])[0],PSIsContainer:f.dir}; }
   function write(s,path,content,dir=false) {
     if (typeof content!=='string' || content.length>MAX_FILE) fail('Virtual file exceeds the 65,536 character limit.');
     const parent=get(s,parentPath(path)); if (!parent || !parent.dir) fail('Could not find the destination directory: '+parentPath(path));
@@ -415,7 +494,8 @@
     if(!existing && Object.keys(s.files).length>=MAX_FILES) fail('Virtual file limit reached.');
     const size=Object.values(s.files).reduce((n,f)=>n+f.content.length,0)-(existing?.content.length||0)+content.length;
     if(size>1048576) fail('Virtual storage limit reached.');
-    s.files[path.toLowerCase()]={path:existing?.path||path,dir,content}; return get(s,path);
+    const latest=Math.max(Date.parse('2026-10-28T00:15:00.000Z'),...Object.values(s.files).map(f=>Date.parse(f.lastWriteTime||seedTime(f.path))));
+    s.files[path.toLowerCase()]={path:existing?.path||path,dir,content,lastWriteTime:new Date(latest+60000).toISOString()}; return get(s,path);
   }
   function createSession(config={}) {
     const scenario=config.scenario||'base'; if(!scenarios.includes(scenario)) fail('Unknown scenario.');
@@ -423,6 +503,7 @@
     for(const path of ['C:\\','D:\\','C:\\Lab','C:\\Lab\\Logs','C:\\Lab\\Reports','C:\\Lab\\Shared Files','C:\\Lab\\Archive','C:\\Users\\student\\Documents','C:\\Users\\student\\AppData\\Local\\Temp','D:\\Support']) {ensureParents(s,path);s.files[path.toLowerCase()]={path,dir:true,content:''};}
     const files=[['C:\\Lab\\readme.txt','PowerShell practice lab.\nRead, filter, and verify.\n'],['C:\\Lab\\Shared Files\\guide.txt','Quote paths containing spaces.\nUse -LiteralPath for exact names.\n'],['C:\\Lab\\Logs\\app.log','09:00 INFO App started\n09:05 ERROR Print service unavailable\n09:08 ERROR Job failed\n09:10 INFO Retry scheduled\n'],['C:\\Lab\\notes.txt','Ticket 1042\nInvestigate before changing settings.\n'],['C:\\Lab\\devices.csv','Name,Department,FreeGB\nPC-014,Sales,8\nPC-021,Support,42\nPC-032,Sales,5\n'],['C:\\Lab\\settings.json','{"Name":"PC-014","Department":"Sales","FreeGB":8}'],['C:\\Lab\\Logs\\archive.log','Archived log.\n'.repeat(100)]];
     for(const [path,content] of files) write(s,path,content);
+    for(const f of Object.values(s.files))f.lastWriteTime=seedTime(f.path);
     if(config.files!==undefined) {
       if(!Array.isArray(config.files)||config.files.length>100) fail('Invalid seed files.');
       for(const f of config.files) {const p=resolve(s,f.path);ensureParents(s,p);write(s,p,f.content||'',f.dir===true);}
@@ -479,19 +560,25 @@
     }
     if(quote||depth)fail('Unclosed quote or script block.');flush();return tokens;
   }
+  function parameterKey(token,names) {
+    const key=token.slice(1).toLowerCase();if(names.includes(key))return key;
+    const candidates=names.filter(name=>name.startsWith(key));
+    if(candidates.length>1)fail('Ambiguous parameter '+token+'. Possible matches: '+candidates.map(name=>'-'+name).join(', ')+'.');
+    return candidates[0]||key;
+  }
   function parseParams(args,values=[],flags=[],posNames=[]) {
     const valueSet=new Set(values.map(x=>x.toLowerCase())),flagSet=new Set(flags.map(x=>x.toLowerCase()));
     const p={};let pos=0;
     for(let i=0;i<args.length;i++) {
       const a=args[i];
       if(/^-[A-Za-z]/.test(a)) {
-        const k=a.slice(1).toLowerCase();if(own(p,k))fail('A parameter was specified more than once: '+a);
+        const k=parameterKey(a,[...valueSet,...flagSet]);if(valueSet.has(k)||flagSet.has(k))args[i]='-'+k;if(own(p,k))fail('A parameter was specified more than once: '+a);
         if(flagSet.has(k))p[k]=true;
         else if(valueSet.has(k)){if(i+1>=args.length||/^-[A-Za-z]/.test(args[i+1]))fail('Missing value for '+a);p[k]=args[++i];}
         else unsupported('Unsupported parameter '+a+'. See Get-Help for the implemented syntax.');
       } else {
         while(pos<posNames.length&&own(p,posNames[pos]))pos++;
-        if(pos>=posNames.length)fail('Unexpected argument: '+a);
+        if(pos>=posNames.length)fail("A positional parameter cannot be found that accepts argument '"+a+"'.");
         p[posNames[pos++]]=a;
       }
     }
@@ -504,6 +591,7 @@
   // Spaces around property-list commas are optional in PowerShell. Join only
   // the -Property value (or its positional equivalent), never arbitrary text.
   function propertyListArgs(args) {
+    for(let i=0;i<args.length;i++)if(/^-[A-Za-z]/.test(args[i])){const key=parameterKey(args[i],['property','first','last','expandproperty','autosize']);if(['property','first','last','expandproperty','autosize'].includes(key))args[i]='-'+key;}
     const joined=[];let positional=true;
     function consume(start){let value=args[start],end=start;if(value===undefined)return {value,end};while(value.endsWith(',')||args[end+1]?.startsWith(',')){if(end+1>=args.length||/^-[A-Za-z]/.test(args[end+1]))fail('Supply a property name after the comma.');value+=args[++end];}return {value,end};}
     for(let i=0;i<args.length;i++) {
@@ -513,7 +601,7 @@
       else if(!token.startsWith('-')&&positional){const list=consume(i);joined.push(list.value);i=list.end;positional=false;}
       else joined.push(token);
     }
-    return joined;
+    args.splice(0,args.length,...joined);return args;
   }
   function expressionValue(s,text) {
     const input=text.trim();
@@ -533,6 +621,9 @@
   }
   function condition(args,session) {
     let prop,op,value,cast=false;
+    if(args[0]&&/^-[A-Za-z]/.test(args[0])&&parameterKey(args[0],['property'])==='property')args[0]='-property';
+    const propertyArgument=args[args[0]==='-property'?1:0];
+    if(propertyArgument?.startsWith('$_.'))fail('Where-Object received $_.Property without a script block. Use Where-Object { $_.Status -eq Stopped } or Where-Object Status -eq Stopped.');
     if(args.length===1&&args[0].startsWith('{')){const m=args[0].match(/^\{\s*(\[int\]|\[double\])?\s*\$_\.([A-Za-z][\w]*)\s+-(eq|ne|gt|ge|lt|le|like)\s+(.+?)\s*\}$/i);if(!m)unsupported('Where-Object supports { $_.Property -operator value }, optionally [int] or [double].');[,cast,prop,op,value]=m;value=literal(value,session);}
     else {const a=args[0]?.toLowerCase()==='-property'?args.slice(1):args;if(a.length!==3||!/^-(eq|ne|gt|ge|lt|le|like)$/i.test(a[1]))unsupported('Use Where-Object Property -eq value or a simple script block.');[prop,op,value]=a;op=op.slice(1);value=literal(value,session);}
     safeKey(prop);
@@ -582,7 +673,7 @@
       if(name==='rename-item'){if(/[\\/¥￥:]/.test(dest)||dest==='.'||dest==='..')fail('Rename-Item changes a name in the same directory. Use Move-Item to change directories.');dest=parentPath(source.path)+'\\'+dest;}
       let target=pathOf(dest);if(get(s,target)?.dir){if(name==='rename-item')fail('An item with that name already exists.');target=pathOf(target+'\\'+basename(source.path));}
       if(target.toLowerCase()===source.path.toLowerCase())fail('Source and destination are the same.');if(get(s,target))fail('The destination already exists.');
-      const preview=whatIf(p,name,source.path+' -> '+target);if(preview)return preview;write(s,target,source.content);if(name!=='copy-item')delete s.files[source.path.toLowerCase()];return result([],'System.Object',{effects:[name+':'+source.path+' -> '+target]});
+      const preview=whatIf(p,name,source.path+' -> '+target);if(preview)return preview;write(s,target,source.content).lastWriteTime=source.lastWriteTime||seedTime(source.path);if(name!=='copy-item')delete s.files[source.path.toLowerCase()];return result([],'System.Object',{effects:[name+':'+source.path+' -> '+target]});
     }
     if(name==='remove-item'){const p=parseParams(args,['path','literalpath'],['whatif'],['path']);const f=textFile(requireParam({path:pathParams(p)},'path'));const preview=whatIf(p,name,f.path);if(preview)return preview;delete s.files[f.path.toLowerCase()];return result([],'System.Object',{effects:['remove-item:'+f.path]});}
     if(name==='write-output'){if(!args.length)return result([],'System.String');if(args.some(a=>/^-[A-Za-z]/.test(a)))unsupported('Write-Output parameters are not implemented.');return result(args,'System.String');}
@@ -591,14 +682,16 @@
       const first=stream.items[0],process=stream.type==='System.Diagnostics.Process';
       const props=plain(first)?Object.keys(first):typeof first==='string'?['Length']:[];
       const items=props.map(Name=>{
+        const alias=process && {Name:'ProcessName',Handles:'HandleCount',SI:'SessionId',WS:'WorkingSet64'}[Name];
+        if(alias)return {Name,MemberType:'AliasProperty',Definition:Name+' = '+alias};
         if(process && Name==='CPU')return {Name,MemberType:'ScriptProperty',Definition:'System.Object CPU {get=$this.TotalProcessorTime.TotalSeconds;}'};
         if(process && Name==='Path')return {Name,MemberType:'ScriptProperty',Definition:'System.Object Path {get=$this.MainModule.FileName;}'};
         const v=property(first,Name);
-        const type=process && Name==='StartTime'?'datetime':typeof v==='string'?'string':typeof v==='boolean'?'bool':typeof v==='number'?(/^(CPU|Average)$/i.test(Name)?'double':/^(Length|WorkingSet64)$/i.test(Name)?'long':'int'):Array.isArray(v)?'System.Object[]':'System.Object';
+        const type=(process && Name==='StartTime')||Name==='LastWriteTime'?'datetime':typeof v==='string'?'string':typeof v==='boolean'?'bool':typeof v==='number'?(/^(CPU|Average)$/i.test(Name)?'double':/^(Length|WorkingSet64)$/i.test(Name)?'long':'int'):Array.isArray(v)?'System.Object[]':'System.Object';
         return {Name,MemberType:'Property',Definition:type+' '+Name+' {get;}'};
       });
       if(process)for(const [Name,Definition]of [['GetType','type GetType()'],['Refresh','void Refresh()'],['ToString','string ToString()']])items.push({Name,MemberType:'Method',Definition});
-      items.sort((a,b)=>(a.MemberType==='Method'?0:1)-(b.MemberType==='Method'?0:1)||a.Name.localeCompare(b.Name));
+      items.sort((a,b)=>a.MemberType.localeCompare(b.MemberType)||a.Name.localeCompare(b.Name));
       return result(items,'Microsoft.PowerShell.Commands.MemberDefinition',{output:'TypeName: '+stream.type+'\n\n'+format({items})});
     }
     if(name==='where-object')return result(stream.items.filter(condition(args,s)),stream.type);
@@ -609,7 +702,7 @@
       if(p.property){const cols=columns(p.property);items=items.map(x=>Object.fromEntries(cols.map(k=>[k,property(x,k)??null])));return result(items,'Selected.'+stream.type);}return result(items,stream.type);
     }
     if(name==='sort-object'){if(args.some(x=>x.includes(',')))unsupported('Sort-Object supports one property in this simulator; multiple sort keys are not implemented.');const p=parseParams(args,['property'],['descending'],['property']);const prop=requireParam(p,'property');safeKey(prop);const items=[...stream.items].sort((a,b)=>{const av=property(a,prop),bv=property(b,prop);let n=typeof av==='number'&&typeof bv==='number'?av-bv:String(av??'').toLowerCase().localeCompare(String(bv??'').toLowerCase());return p.descending?-n:n;});return result(items,stream.type);}
-    if(name==='measure-object'){const p=parseParams(args,['property'],['sum','average'],['property']);if((p.sum||p.average)&&!p.property)fail('Specify -Property for a numeric aggregate.');const row={Count:stream.items.length};if(p.property){safeKey(p.property);row.Property=p.property;const values=stream.items.map(x=>Number(property(x,p.property)));if(values.some(v=>!Number.isFinite(v)))fail('The selected property is not numeric.');const sum=values.reduce((a,b)=>a+b,0);if(p.sum)row.Sum=sum;if(p.average)row.Average=values.length?sum/values.length:null;}return result([row],'Microsoft.PowerShell.Commands.GenericMeasureInfo');}
+    if(name==='measure-object'){const p=parseParams(args,['property'],['sum','average'],['property']);if((p.sum||p.average)&&!p.property)fail('Specify -Property for a numeric aggregate.');const row={Count:stream.items.length};if(p.property){safeKey(p.property);row.Property=p.property;const raw=stream.items.map(x=>property(x,p.property)).filter(value=>value!==undefined);row.Count=raw.length;if(p.sum||p.average){const values=raw.map(Number);if(values.some(v=>!Number.isFinite(v)))fail('The selected property is not numeric.');const sum=values.reduce((a,b)=>a+b,0);if(p.sum)row.Sum=sum;if(p.average)row.Average=values.length?sum/values.length:null;}}return result([row],'Microsoft.PowerShell.Commands.GenericMeasureInfo');}
     if(name==='group-object'){if(args.some(x=>x.includes(',')))unsupported('Group-Object supports one property in this simulator; multiple group keys are not implemented.');const p=parseParams(args,['property'],[],['property']);const prop=requireParam(p,'property');safeKey(prop);const groups=new Map();for(const item of stream.items){const value=scalar(property(item,prop)),key=value.toLowerCase();if(!groups.has(key))groups.set(key,{Count:0,Name:value,Group:[]});const g=groups.get(key);g.Count++;g.Group.push(item);}return result([...groups.values()],'Microsoft.PowerShell.Commands.GroupInfo');}
     if(name==='foreach-object'){if(args.length!==1)unsupported('ForEach-Object supports one simple property script block.');const m=args[0].match(/^\{\s*\$_\.([A-Za-z][\w]*)\s*\}$/);if(!m)unsupported('This lesson supports ForEach-Object { $_.Name }. General scripts and loops are not implemented.');safeKey(m[1]);return result(stream.items.map(x=>property(x,m[1])??null),'System.Object');}
     if(name==='format-table'||name==='format-list'){const p=parseParams(propertyListArgs(args),['property'],name==='format-table'?['autosize']:[],['property']);const cols=p.property?columns(p.property):undefined;return result([{Text:format(stream,name==='format-list'?'list':'table',cols)}],'PSR.FormatData');}
@@ -622,14 +715,47 @@
     if(name==='import-csv'){const p=parseParams(args,['path','literalpath'],[],['path']);return result(csvParse(textFile(requireParam({path:pathParams(p)},'path')).content),'System.Management.Automation.PSCustomObject');}
     if(name==='convertto-json'){const p=parseParams(args,['depth']);if(p.depth!==undefined)integer(p.depth,1,10);const value=stream.items.length===1?stream.items[0]:stream.items;safeData(value);return result([JSON.stringify(value,null,2)],'System.String');}
     if(name==='convertfrom-json'){parseParams(args);const value=JSON.parse(stream.items.map(scalar).join('\n'));safeData(value);return result(Array.isArray(value)?value:[value],'System.Management.Automation.PSCustomObject');}
-    if(name==='select-string'){const p=parseParams(args,['path','literalpath','pattern'],['simplematch'],['pattern']);const pattern=requireParam(p,'pattern');if(!p.simplematch&&/[\[\]().*+?^$\\{}|]/.test(pattern))unsupported('Regular expressions are not implemented. Use -SimpleMatch for literal text.');let entries;if(pathParams(p)!==undefined){const f=textFile(pathParams(p));entries=f.content.split(/\r?\n/).map((Line,i)=>({LineNumber:i+1,Line,Path:f.path,Pattern:pattern}));}else entries=stream.items.map((x,i)=>({LineNumber:i+1,Line:scalar(x),Path:'InputStream',Pattern:pattern}));return result(entries.filter(x=>x.Line.toLowerCase().includes(pattern.toLowerCase())),'Microsoft.PowerShell.Commands.MatchInfo');}
+    if(name==='select-string'){const p=parseParams(args,['path','literalpath','pattern'],['simplematch'],['pattern','path']);const pattern=requireParam(p,'pattern');if(!p.simplematch&&/[\[\]().*+?^$\\{}|]/.test(pattern))unsupported('Regular expressions are not implemented. Use -SimpleMatch for literal text.');let entries;if(pathParams(p)!==undefined){const f=textFile(pathParams(p));entries=f.content.split(/\r?\n/).map((Line,i)=>({LineNumber:i+1,Line,Path:f.path,Pattern:pattern}));}else entries=stream.items.map((x,i)=>({LineNumber:i+1,Line:scalar(x),Path:'InputStream',Pattern:pattern}));return result(entries.filter(x=>x.Line.toLowerCase().includes(pattern.toLowerCase())),'Microsoft.PowerShell.Commands.MatchInfo');}
     const net=Network.execute(name,args,stream,s,options);if(net)return {...result(),...net};
     unsupported('Command not implemented: '+name+'. Use Get-Command to see the supported commands.');
+  }
+  function checkWideSyntax(line,language) {
+    let quote='',masked='';
+    for(let i=0;i<line.length;i++){
+      const c=line[i];
+      if(c==='`'&&quote!=="'"){masked+='  ';i++;continue;}
+      if(quote){if(c===quote){if(line[i+1]===quote){i++;masked+=' ';}else quote='';}masked+=' ';continue;}
+      if(c==='"'||c==="'"){quote=c;masked+=' ';continue;}
+      masked+=c;
+    }
+    let bad=masked.includes('｜')?'｜':masked.includes('　')?'　':null;
+    if(!bad&&/(?:^|[\s|])[^\s|]*－/.test(masked)){
+      // A full-width dash is suspicious in a command or parameter, not a filename.
+      const token=masked.match(/(?:^|[\s|])([^\s|]*－[^\s|]*)/)?.[1]||'';
+      if(token.startsWith('－')||/^\w+－\w+$/.test(token))bad='－';
+    }
+    if(!bad)for(const stage of masked.split(/[|]/)){
+      if(/^\s*(?:(?:select-object|select|format-table|ft|format-list|fl|sort-object|sort|group-object|measure-object|measure)\b)/i.test(stage)&&/[、，]/.test(stage)){bad=stage.includes('、')?'、':'，';break;}
+    }
+    if(!bad)return;
+    const replacement={'｜':'|','－':'-','、':',','，':',','　':'ASCII space (U+0020)'}[bad];
+    fail(language==='en'?'Full-width syntax character '+JSON.stringify(bad)+' detected. Replace it with '+JSON.stringify(replacement)+'. Quote filenames or text that intentionally contain it.':'構文に全角文字 '+JSON.stringify(bad)+' が含まれています。半角の '+JSON.stringify(bad==='　'?'空白 (U+0020)':replacement)+' に置き換えてください。ファイル名や本文として使う場合は引用符で囲んでください。');
+  }
+  function explainError(message,language) {
+    const english=language==='en';
+    if(message.startsWith('A positional parameter cannot be found'))return message+'\n'+(english?'Spaces split arguments. Put a path or text containing spaces in quotes, for example "C:\\Lab\\Shared Files\\guide.txt" or "Ticket 1042".':'空白で引数が分かれています。空白を含むパスや本文を引用符で囲んでください。例: "C:\\Lab\\Shared Files\\guide.txt" / "Ticket 1042"');
+    if(message.startsWith('Where-Object received'))return message+'\n'+(english?'Use braces around an expression containing $_, or omit $_. in the simplified form.':'$_ を使う式は { } で囲みます。簡易形式では $_. を付けずにプロパティ名を書きます。');
+    if(message.startsWith('Ambiguous parameter'))return message+'\n'+(english?'Type more of the parameter name until only one candidate matches.':'候補が一つになるまでパラメーター名を長く入力してください。');
+    const command=message.match(/Command not implemented: ([\w.-]+)\./)?.[1]?.replace(/\.exe$/i,'').toLowerCase();
+    const replacements={ping:'Test-Connection intranet.corp.example',ipconfig:'Get-NetIPConfiguration',nslookup:'Resolve-DnsName intranet.corp.example',findstr:'Select-String -Path C:\\Lab\\Logs\\app.log -Pattern ERROR -SimpleMatch',mkdir:'New-Item -Path C:\\Lab\\Reports\\NewFolder -ItemType Directory',md:'New-Item -Path C:\\Lab\\Reports\\NewFolder -ItemType Directory',systeminfo:'Get-CimInstance Win32_OperatingSystem',wevtutil:'Get-WinEvent -LogName System -MaxEvents 3'};
+    if(command&&replacements[command])return message+'\n'+(english?'In this simulator, use: ':'この教材では次の PowerShell コマンドを使います: ')+replacements[command];
+    return message;
   }
   function run(session,line,options={}) {
     options={language:'ja',...options};const entry={line:String(line),stdout:'',stderr:'',code:0,trace:[],effects:[]};
     try{
       if(typeof line!=='string'||line.length>MAX_LINE)fail('Command line exceeds the 4,096 character limit.');if(!line.trim())return entry;
+      checkWideSyntax(line,options.language);
       let source=line.trim(),assignment=null;const match=source.match(/^\$([A-Za-z][\w]*)\s*=\s*(.+)$/s);if(match){assignment=match[1].toLowerCase();safeKey(assignment);if(/^(env|psversiontable)$/i.test(assignment))fail('This built-in variable is read-only in the simulator.');source=match[2];}
       let stream=result();const stages=splitPipeline(source);
       for(let index=0;index<stages.length;index++){
@@ -645,7 +771,7 @@
           if(commandToken.quoted){if(args.length)fail('Unexpected argument after a string expression.');out=result([commandToken.text],'System.String');trace.name='write-output';trace.args=[commandToken.text];}
           else if(commandToken.text.startsWith('$')){if(args.length)fail('Unexpected argument after a variable expression.');out=expressionValue(session,commandToken.text);trace.name=commandToken.text.toLowerCase();}
           else out=execute(session,name,args,stream,paths,options);
-          if(out.items.length>2000)fail('Pipeline exceeds the 2,000 object limit.');safeData(out.items);trace.outputType=out.type;trace.outputCount=out.items.length;trace.objects=clone(out.items);trace.output=(out.output??format(out)).slice(0,MAX_OUTPUT);trace.error=out.error||'';trace.code=out.code||0;entry.effects.push(...(out.effects||[]));
+          if(out.items.length>2000)fail('Pipeline exceeds the 2,000 object limit.');safeData(out.items);trace.outputType=out.type;trace.outputCount=out.items.length;trace.objects=clone(out.items);if(out.targetObjects!==undefined)trace.targetObjects=clone(out.targetObjects);trace.output=(out.output??format(out)).slice(0,MAX_OUTPUT);trace.error=out.error||'';trace.code=out.code||0;entry.effects.push(...(out.effects||[]));
           if(trace.code){entry.code=trace.code;entry.stderr=trace.error;break;}
           stream=out;
           if(redir){const target=resolve(session,redir.path);trace.redirectionPath=target;write(session,target,(redir.append?(get(session,target)?.content||''):'')+trace.output+'\n');entry.effects.push('redirect:'+target);stream=result();}
@@ -654,6 +780,7 @@
       }
       if(!entry.code&&assignment){if(!own(session.variables,assignment)&&Object.keys(session.variables).length>=50)fail('Variable limit reached.');if(JSON.stringify(stream.items).length>262144)fail('Variable is too large.');session.variables[assignment]={items:clone(stream.items),type:stream.type};entry.stdout='';entry.effects.push('variable:'+assignment);}
     }catch(error){entry.code=1;entry.stderr=error.message;entry.stdout='';}
+    if(entry.stderr){entry.stderr=explainError(entry.stderr,options.language);for(const trace of entry.trace)if(trace.error)trace.error=explainError(trace.error,options.language);}
     entry.stdout=entry.stdout.slice(0,MAX_OUTPUT);entry.stderr=entry.stderr.slice(0,MAX_OUTPUT);session.history.push(entry);if(session.history.length>80)session.history.splice(0,session.history.length-80);return entry;
   }
   function listFiles(session){return Object.values(session.files);}
@@ -668,14 +795,14 @@
     if(JSON.stringify(raw).length>10*1024*1024)fail('Session is too large.');safeData(raw.pc);safeData(raw.variables);
     const s=createSession({scenario:raw.scenario});s.files={};
     const entries=Object.entries(raw.files);if(entries.length>MAX_FILES)fail('Too many files.');let size=0;
-    for(const [key,f]of entries){if(!plain(f)||typeof f.path!=='string'||typeof f.dir!=='boolean'||typeof f.content!=='string'||f.content.length>MAX_FILE||!/^([CD]):\\/.test(f.path)||resolve(s,f.path,false)!==f.path||key!==f.path.toLowerCase())fail('Invalid virtual file.');size+=f.content.length;s.files[key]={path:f.path,dir:f.dir,content:f.dir?'':f.content};}
+    for(const [key,f]of entries){if(!plain(f)||typeof f.path!=='string'||typeof f.dir!=='boolean'||typeof f.content!=='string'||f.content.length>MAX_FILE||!/^([CD]):\\/.test(f.path)||resolve(s,f.path,false)!==f.path||key!==f.path.toLowerCase())fail('Invalid virtual file.');if(f.lastWriteTime!==undefined&&(typeof f.lastWriteTime!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(f.lastWriteTime)||!Number.isFinite(Date.parse(f.lastWriteTime))))fail('Invalid file timestamp.');size+=f.content.length;s.files[key]={path:f.path,dir:f.dir,content:f.dir?'':f.content,lastWriteTime:f.lastWriteTime||seedTime(f.path)};}
     if(size>1048576||!get(s,'C:\\')?.dir||!get(s,'D:\\')?.dir)fail('Invalid file tree.');for(const f of Object.values(s.files))if(!/^.[\\:]?\\$/.test(f.path)&&f.path.length>3&&!get(s,parentPath(f.path))?.dir)fail('Missing parent directory.');
     if(typeof raw.cwd!=='string'||!get(s,raw.cwd)?.dir)fail('Invalid current location.');s.cwd=get(s,raw.cwd).path;
-    if(Object.keys(raw.variables).length>50)fail('Too many variables.');s.variables={};for(const [k,v]of Object.entries(raw.variables)){if(!/^[a-z][\w]*$/.test(k)||badKeys.has(k)||!plain(v)||!Array.isArray(v.items)||typeof v.type!=='string')fail('Invalid variable.');safeData(v.items);s.variables[k]=clone(v);}
+    if(Object.keys(raw.variables).length>50)fail('Too many variables.');s.variables={};for(const [k,v]of Object.entries(raw.variables)){if(!/^[a-z][\w]*$/.test(k)||badKeys.has(k)||!plain(v)||!Array.isArray(v.items)||typeof v.type!=='string')fail('Invalid variable.');safeData(v.items);s.variables[k]=clone(v);if(v.type==='System.Diagnostics.Process')s.variables[k].items=s.variables[k].items.map(item=>plain(item)?Network.enrichProcess(item):item);}
     // Network state is restricted to the shape and value kinds seeded for this scenario.
     function checkShape(value,seed,depth=0){if(depth>8)fail('State too deep.');if(Array.isArray(seed)){if(!Array.isArray(value)||value.length>200)fail('Invalid state array.');if(seed.length)value.forEach(v=>checkShape(v,seed[0],depth+1));return;}if(plain(seed)){if(!plain(value)||Object.keys(value).some(k=>!own(seed,k)))fail('Invalid state fields.');for(const [k,v]of Object.entries(seed)){if(!own(value,k))fail('Missing state field.');checkShape(value[k],v,depth+1);}return;}if(typeof value!==typeof seed||typeof value==='number'&&!Number.isFinite(value)||typeof value==='string'&&value.length>4096)fail('Invalid state value.');}
     checkShape(raw.pc,s.pc);s.pc=clone(raw.pc);
-    if(raw.history.length>80)fail('Too much history.');s.history=raw.history.map(h=>{if(!plain(h)||typeof h.line!=='string'||h.line.length>MAX_LINE||typeof h.stdout!=='string'||h.stdout.length>MAX_OUTPUT||typeof h.stderr!=='string'||h.stderr.length>MAX_OUTPUT||!Number.isInteger(h.code)||!Array.isArray(h.trace)||h.trace.length>16||!Array.isArray(h.effects)||h.effects.length>32)fail('Invalid history.');const copy=clone(h);for(const t of copy.trace){if(!plain(t)||typeof t.name!=='string'||t.name.length>64||!Array.isArray(t.args)||t.args.length>256||t.args.some(a=>typeof a!=='string'||a.length>MAX_LINE)||!Number.isInteger(t.code)||typeof t.command!=='string'||typeof t.input!=='string'||typeof t.output!=='string'||typeof t.error!=='string'||[t.input,t.output,t.error].some(x=>x.length>MAX_OUTPUT))fail('Invalid trace.');if(t.resolvedPaths!==undefined&&(!Array.isArray(t.resolvedPaths)||t.resolvedPaths.some(p=>typeof p!=='string'||!/^([CD]):\\/.test(p)||resolve(s,p,false)!==p)))fail('Invalid trace path.');if(t.objects!==undefined)safeData(t.objects);if(t.inputObjects!==undefined){if(!Array.isArray(t.inputObjects))fail('Invalid trace input.');safeData(t.inputObjects);}}return copy;});return s;
+    if(raw.history.length>80)fail('Too much history.');s.history=raw.history.map(h=>{if(!plain(h)||typeof h.line!=='string'||h.line.length>MAX_LINE||typeof h.stdout!=='string'||h.stdout.length>MAX_OUTPUT||typeof h.stderr!=='string'||h.stderr.length>MAX_OUTPUT||!Number.isInteger(h.code)||!Array.isArray(h.trace)||h.trace.length>16||!Array.isArray(h.effects)||h.effects.length>32)fail('Invalid history.');const copy=clone(h);for(const t of copy.trace){if(!plain(t)||typeof t.name!=='string'||t.name.length>64||!Array.isArray(t.args)||t.args.length>256||t.args.some(a=>typeof a!=='string'||a.length>MAX_LINE)||!Number.isInteger(t.code)||typeof t.command!=='string'||typeof t.input!=='string'||typeof t.output!=='string'||typeof t.error!=='string'||[t.input,t.output,t.error].some(x=>x.length>MAX_OUTPUT))fail('Invalid trace.');if(t.resolvedPaths!==undefined&&(!Array.isArray(t.resolvedPaths)||t.resolvedPaths.some(p=>typeof p!=='string'||!/^([CD]):\\/.test(p)||resolve(s,p,false)!==p)))fail('Invalid trace path.');if(t.objects!==undefined)safeData(t.objects);if(t.inputObjects!==undefined){if(!Array.isArray(t.inputObjects))fail('Invalid trace input.');safeData(t.inputObjects);}if(t.targetObjects!==undefined){if(!Array.isArray(t.targetObjects)||t.targetObjects.some(x=>!plain(x)||!Number.isInteger(x.Id)||x.Id<1||typeof x.ProcessName!=='string'))fail('Invalid trace targets.');safeData(t.targetObjects);}}return copy;});return s;
   }
   return {createSession,run,restoreSession,listFiles,complete,reference};
 });
@@ -693,6 +820,18 @@
   const cmd = (name, contains = [], outputIncludes = []) => ({name: name.toLowerCase(), contains, outputIncludes});
   const path = (name, paths, outputIncludes = [], contains = []) => ({...cmd(name, contains, outputIncludes), paths: Array.isArray(paths) ? paths : [paths]});
   const afterChange = check => ({...check, restartOnRepeat: true});
+  const either = (...anyOf) => ({anyOf});
+  const systemEvents = (limited=false) => ({...cmd('Get-WinEvent',['System']),...(limited?{outputCount:3}:{})});
+  const firstThree = () => ({...cmd('Select-Object',['-First','3']),outputCount:3});
+  const eventFields = (name,limited=true) => ({...cmd(name,['TimeCreated,Id,Message'],['Spooler']),...(name==='Select-Object'&&limited?{outputCount:3}:{})});
+  const displayedEvents = () => either(
+    [systemEvents(true),eventFields('Select-Object')],
+    [systemEvents(true),eventFields('Format-List')],
+    [systemEvents(),{...eventFields('Select-Object'),contains:['TimeCreated,Id,Message','-First','3']}],
+    [systemEvents(),firstThree(),eventFields('Select-Object')],
+    [systemEvents(),firstThree(),eventFields('Format-List')],
+    [systemEvents(),eventFields('Select-Object',false),firstThree()]
+  );
   const option = (ja, en, feedbackJa, feedbackEn) => ({text:t(ja,en),feedback:t(feedbackJa,feedbackEn)});
   const quiz = (promptJa, promptEn, correct, wrong1, wrong2) => ({prompt:t(promptJa,promptEn), options:[correct,wrong1,wrong2]});
   const lessons = [];
@@ -723,14 +862,14 @@
     task:t('Get-Command で Get-Content を探し、Get-Help でその使用例を確認してください。','Find Get-Content with Get-Command, then read its examples with Get-Help.'),
     example:{command:'Get-Command -Name Get-*',note:t('Get-* は Get- で始まるコマンドを探す指定です。','Get-* searches for command names beginning with Get-.')},
     hints:[t('コマンド名を -Name の後ろに指定します。','Put the command name after -Name.'),t('使い方を調べるコマンドは Get-Help です。','Use Get-Help to read the usage.'),t('Get-Command -Name Get-Content、続けて Get-Help Get-Content -Examples を実行します。','Run Get-Command -Name Get-Content, then Get-Help Get-Content -Examples.')],
-    solution:['Get-Command -Name Get-Content','Get-Help Get-Content -Examples'],success:t('知らないコマンドを調べてから試す準備ができました。','You can now look up a command before trying it.'),verify:{commands:[cmd('Get-Command',['Get-Content']),cmd('Get-Help',['Get-Content','-Examples'])]}});
+    solution:['Get-Command -Name Get-Content','Get-Help Get-Content -Examples'],success:t('知らないコマンドを調べてから試す準備ができました。','You can now look up a command before trying it.'),verify:{commands:[cmd('Get-Command',['Get-Content']),either(cmd('Get-Help',['Get-Content','-Examples'],['EXAMPLES']),cmd('Get-Help',['Get-Content','-Full'],['EXAMPLES']))]}});
 
   add({id:'version-and-alias',track:'basics',title:t('バージョンと別名','Versions and aliases'),
     goal:t('PowerShell の版と、短い名前の正体を確認する。','Identify the PowerShell edition and the command behind an alias.'),
     explanation:[t('$PSVersionTable は実行中の PowerShell の情報です。Windows PowerShell 5.1 と PowerShell 7 は別の製品で、コマンドや出力、既定の文字コードに違いがあります。表示される版番号は、この演習の固定値です。','$PSVersionTable describes the running PowerShell. Windows PowerShell 5.1 and PowerShell 7 are separate products with differences in commands, output, and default encodings. The version shown here is a fixed practice value.'),t('gci は Get-ChildItem のエイリアスです。この教材では意味を読み取りやすい正式名を中心に使います。Windows PowerShell 5.1 の curl は Invoke-WebRequest の別名になり得るため、別製品の curl.exe と区別します。','gci is an alias for Get-ChildItem. Lessons mainly use full names to keep their purpose clear. In Windows PowerShell 5.1, curl can be an alias for Invoke-WebRequest; distinguish that from the separate curl.exe program.')],
-    task:t('$PSVersionTable を表示し、Get-Alias で gci の正式名を確認してください。','Display $PSVersionTable, then use Get-Alias to find the command behind gci.'),example:{command:'Get-Alias -Name gci',note:t('短い名前がどのコマンドを指すか確かめます。','Check which command a short name refers to.')},
+    task:t('$PSVersionTable または $PSVersionTable.PSVersion でバージョンを確認し、Get-Alias で gci の正式名を確認してください。','Check the version with $PSVersionTable or $PSVersionTable.PSVersion, then use Get-Alias to find the command behind gci.'),example:{command:'Get-Alias -Name gci',note:t('短い名前がどのコマンドを指すか確かめます。','Check which command a short name refers to.')},
     hints:[t('$ を含めて $PSVersionTable と入力します。','Include the $ when entering $PSVersionTable.'),t('エイリアスの一覧は Get-Alias です。','Get-Alias shows aliases.'),t('$PSVersionTable、続けて Get-Alias -Name gci を実行します。','Run $PSVersionTable, then Get-Alias -Name gci.')],
-    solution:['$PSVersionTable','Get-Alias -Name gci'],success:t('自分が使っているシェルと名前の対応を確認できました。','You checked the shell edition and the alias mapping.'),verify:{commands:[cmd('$PSVersionTable',[],['PSVersion']),cmd('Get-Alias',['gci'],['Get-ChildItem'])]}});
+    solution:['$PSVersionTable','Get-Alias -Name gci'],success:t('自分が使っているシェルと名前の対応を確認できました。','You checked the shell edition and the alias mapping.'),verify:{commands:[either(cmd('$PSVersionTable',[],['PSVersion']),cmd('$PSVersionTable.PSVersion',[],['7.5.0'])),cmd('Get-Alias',['gci'],['Get-ChildItem'])]}});
 
   add({id:'current-location',track:'basics',title:t('現在地とパス','Your location and paths'),goal:t('現在地を確認して、作業用フォルダーへ移動する。','Check your location and move to the practice folder.'),
     explanation:[t('Get-Location は現在地を返し、Set-Location は場所を変更します。C:\\Lab のような絶対パスと、. や .. を使う相対パスがあります。PowerShell の別ドライブへの移動に、CMD の /d は使いません。','Get-Location returns your location; Set-Location changes it. C:\\Lab is an absolute path, while . and .. are relative. Unlike CMD, PowerShell does not use /d when changing drives.'),t('日本語の課題と見本はパス区切りを ¥、英語はバックスラッシュで表示します。この教材はパスに入力した ¥・￥ も区切りとして受け付けます。本文中の通貨表記は変えません。','Japanese lessons display path separators as ¥; English uses backslashes. As an input aid, this simulator accepts typed ¥ and ￥ in paths. Currency symbols in file contents stay unchanged.')],
@@ -738,7 +877,7 @@
     hints:[t('まず Get-Location を実行します。','Start with Get-Location.'),t('移動には Set-Location -Path を使います。','Use Set-Location -Path to move.'),t('Get-Location → Set-Location -Path C:\\Lab → Get-Location の順です。','Run Get-Location, Set-Location -Path C:\\Lab, then Get-Location.')],solution:['Get-Location',c`Set-Location -Path C:\Lab`,'Get-Location'],success:t('移動前と移動後の現在地を確認できました。','You checked your location before and after moving.'),verify:{orderedCommands:[cmd('Get-Location'),path('Set-Location',c`C:\Lab`),cmd('Get-Location',[],[c`C:\Lab`])],cwd:c`C:\Lab`}});
 
   add({id:'list-files',track:'basics',title:t('フォルダーの中を見る','List a folder'),goal:t('ファイルとフォルダーを区別して一覧を取得する。','List a folder and distinguish files from directories.'),
-    explanation:[t('Get-ChildItem は指定した場所の中身を返します。-File ならファイルだけ、-Directory ならフォルダーだけです。-Recurse を付けたときだけ、子フォルダーの中も調べます。','Get-ChildItem returns the contents of a location. -File keeps files; -Directory keeps folders. -Recurse also inspects descendants.'),t('画面の表はオブジェクトの見せ方です。ファイルには Name、Length、FullName などの項目があり、後から項目を指定して調べられます。','The table is a display of objects. Files have properties such as Name, Length, and FullName that you can inspect later.')],task:t('C:\\Lab の直下にあるファイルだけを表示してください。','List only the files directly inside C:\\Lab.'),example:{command:c`Get-ChildItem -Path C:\Lab -Directory`,note:t('この例はフォルダーだけです。課題ではファイルだけを選びます。','This example selects folders. Select files for the task.')},hints:[t('Get-ChildItem に場所を指定します。','Pass the location to Get-ChildItem.'),t('ファイルだけを選ぶ指定は -File です。','Use -File to select files.'),t('Get-ChildItem -Path C:\\Lab -File を実行します。','Run Get-ChildItem -Path C:\\Lab -File.')],solution:[c`Get-ChildItem -Path C:\Lab -File`],success:t('対象の階層と種類を指定できました。','You selected the intended level and item type.'),verify:{commands:[path('Get-ChildItem',c`C:\Lab`,['readme.txt','devices.csv'],['-File'])]}});
+    explanation:[t('Get-ChildItem は指定した場所の中身を返します。-File ならファイルだけ、-Directory ならフォルダーだけです。-Recurse を付けたときだけ、子フォルダーの中も調べます。','Get-ChildItem returns the contents of a location. -File keeps files; -Directory keeps folders. -Recurse also inspects descendants.'),t('画面の表はオブジェクトの見せ方です。ファイルには Name、Length、LastWriteTime（最終更新日時）、FullName などの項目があり、後から項目を指定して調べられます。','The table is a display of objects. Files have properties such as Name, Length, LastWriteTime (last modification time), and FullName that you can inspect later.')],task:t('C:\\Lab の直下にあるファイルだけを表示してください。','List only the files directly inside C:\\Lab.'),example:{command:c`Get-ChildItem -Path C:\Lab -Directory`,note:t('この例はフォルダーだけです。課題ではファイルだけを選びます。','This example selects folders. Select files for the task.')},hints:[t('Get-ChildItem に場所を指定します。','Pass the location to Get-ChildItem.'),t('ファイルだけを選ぶ指定は -File です。','Use -File to select files.'),t('Get-ChildItem -Path C:\\Lab -File を実行します。','Run Get-ChildItem -Path C:\\Lab -File.')],solution:[c`Get-ChildItem -Path C:\Lab -File`],success:t('対象の階層と種類を指定できました。','You selected the intended level and item type.'),verify:{commands:[path('Get-ChildItem',c`C:\Lab`,['readme.txt','devices.csv'],['-File'])]}});
 
   add({id:'quoted-path',track:'basics',title:t('空白を含むパスを読む','Read a path containing spaces'),goal:t('空白を含むパスを引用符で一つの引数にする。','Quote a path containing spaces so it remains one argument.'),explanation:[t('空白を含むパスは引用符で囲み、一つの引数として渡します。PowerShell のバックスラッシュは文字列のエスケープ文字ではありません。','Quote a path containing spaces so it is passed as one argument. The backslash is not PowerShell’s string escape character.'),t('空白だけなら -Path と引用符で指定できます。-LiteralPath は guide[1].txt のように [ ] を含む名前を、ワイルドカードとして解釈させずに使うための指定です。単一引用符は基本的に文字をそのまま、二重引用符は変数などを展開します。','For spaces alone, -Path with quotes is sufficient. -LiteralPath is useful for names such as guide[1].txt, where brackets must not be interpreted as wildcards. Single quotes are literal; double quotes can expand variables.')],task:t('C:\\Lab\\Shared Files\\guide.txt を、パス全体を引用符で囲んで読んでください。','Read C:\\Lab\\Shared Files\\guide.txt, enclosing the entire path in quotes.'),example:{command:c`Get-Content -Path 'C:\Lab\readme.txt'`,note:t('課題のパスには空白が含まれます。引用符も入力します。','The task’s path includes a space. Include the quotes.')},hints:[t('内容を読むコマンドは Get-Content です。','Get-Content reads file contents.'),t('パス全体を単一引用符または二重引用符で囲みます。','Enclose the entire path in single or double quotes.'),t("Get-Content -Path 'C:\\Lab\\Shared Files\\guide.txt' を実行します。","Run Get-Content -Path 'C:\\Lab\\Shared Files\\guide.txt'.")],solution:[c`Get-Content -Path 'C:\Lab\Shared Files\guide.txt'`],success:t('空白で分かれないよう、正確なファイル名を渡せました。','You passed the exact filename as a single argument.'),verify:{commands:[path('Get-Content',c`C:\Lab\Shared Files\guide.txt`,['Quote paths containing spaces.'])]}});
 
@@ -753,15 +892,15 @@
   add({id:'move-and-rename',track:'basics',title:t('移動と名前の変更','Move and rename a file'),goal:t('場所を変える操作と名前を変える操作を区別する。','Distinguish relocating a file from changing its name.'),explanation:[t('Move-Item はファイルの場所を変えます。Rename-Item は同じ場所で名前を変えます。-NewName には移動先フォルダーを含めません。','Move-Item relocates a file. Rename-Item changes its name in the same location. Do not put a destination folder in -NewName.'),t('操作をやり直すとき、元の名前は既に存在しないことがあります。仮想ファイル一覧や Get-ChildItem で現在の場所を確認してください。「このレッスンをリセット」で初期状態にも戻せます。','When retrying an operation, the old name may already be gone. Check the current location with Get-ChildItem or the virtual-file list. Resetting the lesson also restores its initial state.')],task:t('Move-Item で C:\\Lab\\notes.txt を Archive フォルダーへ移動し、Rename-Item で ticket-1042.txt に変更して、読み戻してください。','Use Move-Item to move C:\\Lab\\notes.txt into Archive, then Rename-Item to name it ticket-1042.txt. Read it back.'),example:{command:c`Rename-Item -Path C:\Lab\readme.txt -NewName guide.txt`,note:t('名前だけを変える例です。場所を変えるには Move-Item を使います。','This changes only the name. Use Move-Item to change location.')},hints:[t('移動先は C:\\Lab\\Archive です。','The destination folder is C:\\Lab\\Archive.'),t('名前変更の対象は、移動後の C:\\Lab\\Archive\\notes.txt です。','Rename C:\\Lab\\Archive\\notes.txt after the move.'),t('Move-Item の後、Rename-Item -Path C:\\Lab\\Archive\\notes.txt -NewName ticket-1042.txt を使い、新しいパスを読みます。','After Move-Item, run Rename-Item -Path C:\\Lab\\Archive\\notes.txt -NewName ticket-1042.txt, then read the new path.')],solution:[c`Move-Item -Path C:\Lab\notes.txt -Destination C:\Lab\Archive`,c`Rename-Item -Path C:\Lab\Archive\notes.txt -NewName ticket-1042.txt`,c`Get-Content -Path C:\Lab\Archive\ticket-1042.txt`],success:t('移動と名前変更の役割を分け、最終ファイルを確認できました。','You used each operation for its purpose and verified the final file.'),verify:{orderedCommands:[path('Move-Item',c`C:\Lab\notes.txt`),path('Rename-Item',c`C:\Lab\Archive\notes.txt`,[],['ticket-1042.txt']),path('Get-Content',c`C:\Lab\Archive\ticket-1042.txt`,['Ticket 1042'])],files:[{path:c`C:\Lab\Archive\ticket-1042.txt`,includes:['Ticket 1042']}]}});
 
   add({id:'discover-properties',track:'objects',title:t('表の裏にある項目','Discover properties behind the table'),goal:t('Get-Member でオブジェクトの型と項目を調べる。','Inspect object types and properties with Get-Member.'),
-    explanation:[t('PowerShell のパイプ | は、通常、画面に並んだ文字ではなくオブジェクトを次へ渡します。Get-Process が返すものには ProcessName、Id、CPU などの項目があります。','A PowerShell pipe normally passes objects to the next command, rather than the characters shown on screen. Get-Process objects have properties such as ProcessName, Id, and CPU.'),t('Get-Member は、届いたオブジェクトの型や利用できる項目を調べます。表示されていない項目も調べられることが、テキストを探す操作との違いです。','Get-Member inspects the type and available members of incoming objects. You can discover properties that are absent from the default display.')],task:t('Get-Process の結果を Get-Member にパイプで渡し、項目を確認してください。','Pipe Get-Process into Get-Member and inspect the properties.'),example:{command:'Get-Service | Get-Member',note:t('サービスの型を調べる例です。課題ではプロセスを調べます。','This inspects services. Inspect processes for the task.')},hints:[t('コマンド同士を | でつなぎます。','Connect the commands with |.'),t('左側は Get-Process、右側は Get-Member です。','Put Get-Process on the left and Get-Member on the right.'),t('Get-Process | Get-Member を実行します。','Run Get-Process | Get-Member.')],solution:['Get-Process | Get-Member'],success:t('見えている列だけでなく、扱える項目を調べられました。','You discovered available properties beyond the visible columns.'),verify:{pipelines:[[cmd('Get-Process'),cmd('Get-Member',[],['ProcessName','CPU'])]]},question:quiz('パイプで Get-Member に渡ったものは？','What reached Get-Member through the pipe?',option('プロセスの項目を持つオブジェクト。','Objects with process properties.','項目を指定して絞り込みや並べ替えができます。','Their properties can be used for filtering and sorting.'),option('ターミナルに表示された表の画像。','An image of the terminal table.','画面の画像ではなく、値と項目を持つデータです。','The pipeline carries values and properties, not a picture.'),option('列幅を含めて整形済みの文字列。','Strings already padded to the table’s column widths.','通常の Get-Process は整形前のオブジェクトを返します。','Get-Process normally emits objects before display formatting.'))});
+    explanation:[t('PowerShell のパイプ | は、通常、画面に並んだ文字ではなくオブジェクトを次へ渡します。Get-Process が返すものには ProcessName、Id、CPU などの項目があります。Name は ProcessName、WS は WorkingSet64 の別名で、それぞれ同じ値を取り出せます。','A PowerShell pipe normally passes objects to the next command, rather than the characters shown on screen. Get-Process objects have properties such as ProcessName, Id, and CPU. Name aliases ProcessName, and WS aliases WorkingSet64; each returns its source property’s value.'),t('Get-Member は、届いたオブジェクトの型や利用できる項目を調べます。表示されていない項目も調べられることが、テキストを探す操作との違いです。','Get-Member inspects the type and available members of incoming objects. You can discover properties that are absent from the default display.')],task:t('Get-Process の結果を Get-Member にパイプで渡し、項目を確認してください。','Pipe Get-Process into Get-Member and inspect the properties.'),example:{command:'Get-Service | Get-Member',note:t('サービスの型を調べる例です。課題ではプロセスを調べます。','This inspects services. Inspect processes for the task.')},hints:[t('コマンド同士を | でつなぎます。','Connect the commands with |.'),t('左側は Get-Process、右側は Get-Member です。','Put Get-Process on the left and Get-Member on the right.'),t('Get-Process | Get-Member を実行します。','Run Get-Process | Get-Member.')],solution:['Get-Process | Get-Member'],success:t('見えている列だけでなく、扱える項目を調べられました。','You discovered available properties beyond the visible columns.'),verify:{pipelines:[[cmd('Get-Process'),cmd('Get-Member',[],['ProcessName','CPU'])]]},question:quiz('パイプで Get-Member に渡ったものは？','What reached Get-Member through the pipe?',option('プロセスの項目を持つオブジェクト。','Objects with process properties.','項目を指定して絞り込みや並べ替えができます。','Their properties can be used for filtering and sorting.'),option('ターミナルに表示された表の画像。','An image of the terminal table.','画面の画像ではなく、値と項目を持つデータです。','The pipeline carries values and properties, not a picture.'),option('列幅を含めて整形済みの文字列。','Strings already padded to the table’s column widths.','通常の Get-Process は整形前のオブジェクトを返します。','Get-Process normally emits objects before display formatting.'))});
 
-  add({id:'select-properties',track:'objects',title:t('必要な項目を選ぶ','Select the properties you need'),goal:t('Select-Object で確認する項目を絞る。','Choose useful properties with Select-Object.'),explanation:[t('Select-Object -Property は各オブジェクトから指定した項目を選びます。複数項目はカンマで区切ります。行を条件で絞る Where-Object とは役割が違います。','Select-Object -Property chooses named properties from each object. Separate multiple names with commas. Where-Object filters rows instead.'),t('Id と ProcessName を一緒に残すと、同名のアプリが複数あっても今回の実行を識別しやすくなります。','Keeping Id and ProcessName together helps distinguish running instances with the same name.')],task:t('Get-Process の結果から ProcessName と Id だけを選んで表示してください。','Select only ProcessName and Id from Get-Process.'),example:{command:'Get-Process | Select-Object -Property ProcessName,CPU',note:t('課題では CPU を Id に変えます。','Replace CPU with Id for the task.')},hints:[t('Get-Process からパイプで渡します。','Pipe from Get-Process.'),t('使うのは Select-Object -Property です。','Use Select-Object -Property.'),t('Get-Process | Select-Object -Property ProcessName,Id を実行します。','Run Get-Process | Select-Object -Property ProcessName,Id.')],solution:['Get-Process | Select-Object -Property ProcessName,Id'],success:t('調査に必要な項目を選べました。','You selected the properties needed for the investigation.'),verify:{pipelines:[[cmd('Get-Process'),cmd('Select-Object',['ProcessName,Id'],['NotesApp','4320'])]]}});
+  add({id:'select-properties',track:'objects',title:t('必要な項目を選ぶ','Select the properties you need'),goal:t('Select-Object で確認する項目を絞る。','Choose useful properties with Select-Object.'),explanation:[t('Select-Object -Property は各オブジェクトから指定した項目を選びます。複数項目はカンマで区切ります。行を条件で絞る Where-Object とは役割が違います。','Select-Object -Property chooses named properties from each object. Separate multiple names with commas. Where-Object filters rows instead.'),t('Id と ProcessName を一緒に残すと、同名のアプリが複数あっても今回の実行を識別しやすくなります。この教材にも svchost や msedge が複数あり、それぞれ ID が異なります。','Keeping Id and ProcessName together helps distinguish running instances with the same name. This room includes several svchost and msedge processes, each with a different ID.')],task:t('Get-Process の結果から ProcessName と Id だけを選んで表示してください。','Select only ProcessName and Id from Get-Process.'),example:{command:'Get-Process | Select-Object -Property ProcessName,CPU',note:t('課題では CPU を Id に変えます。','Replace CPU with Id for the task.')},hints:[t('Get-Process からパイプで渡します。','Pipe from Get-Process.'),t('使うのは Select-Object -Property です。','Use Select-Object -Property.'),t('Get-Process | Select-Object -Property ProcessName,Id を実行します。','Run Get-Process | Select-Object -Property ProcessName,Id.')],solution:['Get-Process | Select-Object -Property ProcessName,Id'],success:t('調査に必要な項目を選べました。','You selected the properties needed for the investigation.'),verify:{pipelines:[[cmd('Get-Process'),cmd('Select-Object',['ProcessName,Id'],['NotesApp','4320'])]]}});
 
   add({id:'filter-objects',track:'objects',title:t('条件に合う行を選ぶ','Filter rows by a condition'),goal:t('Where-Object で停止中のサービスを抽出する。','Filter stopped services with Where-Object.'),explanation:[t('Where-Object は条件に合うオブジェクトだけを通します。Status -eq Stopped は Status が Stopped と等しいという比較です。','Where-Object passes only objects that satisfy a condition. Status -eq Stopped compares the Status property with Stopped.'),t('停止しているサービスがすべて異常とは限りません。使わない機能のため意図的に停止・無効化されている場合があります。','A stopped service is not necessarily faulty. Unused features can be intentionally stopped or disabled.')],task:t('Get-Service の結果から Status が Stopped のサービスを抽出してください。','Filter Get-Service to services whose Status is Stopped.'),example:{command:'Get-Service | Where-Object Status -eq Running',note:t('条件の値を Stopped に変えます。','Change the comparison value to Stopped.')},hints:[t('Get-Service を Where-Object へ渡します。','Pipe Get-Service to Where-Object.'),t('比較演算子は -eq です。','Use the -eq comparison operator.'),t('Get-Service | Where-Object Status -eq Stopped を実行します。','Run Get-Service | Where-Object Status -eq Stopped.')],solution:['Get-Service | Where-Object Status -eq Stopped'],success:t('行を選ぶ操作と、選ばれた理由を確認できました。','You filtered the rows and checked why they were selected.'),verify:{pipelines:[[cmd('Get-Service'),{...cmd('Where-Object',[],['RemoteRegistry','Stopped']),outputExcludes:['Spooler','Dnscache']}]]},question:quiz('RemoteRegistry が Stopped と表示されました。どう読む？','RemoteRegistry is Stopped. How should you interpret it?',option('停止という状態を確認した。必要性や起動設定は別に調べる。','It is stopped; check whether it is needed and how startup is configured.','停止という事実だけでは故障と断定できません。','The stopped state alone does not establish a fault.'),option('一覧から選ばれたので、起動操作も実行された。','Being selected means a start operation was also performed.','Where-Object は抽出であり、サービスの開始ではありません。','Where-Object filters data; it does not start services.'),option('Stopped は使用者がいないことを示し、サービス自体は稼働中。','Stopped means no users are active while the service is still running.','Stopped はサービスが停止中という状態です。','Stopped describes the service state, not its user count.'))});
 
   add({id:'sort-and-first',track:'objects',title:t('並べ替えて上位を見る','Sort and inspect the top result'),goal:t('Sort-Object と -First を組み合わせる。','Combine Sort-Object with -First.'),explanation:[t('Sort-Object は項目の値で並べ替えます。-Descending は大きい順です。その後の Select-Object -First 1 は先頭の 1 件を選びます。','Sort-Object orders objects by a property. -Descending puts larger values first. Select-Object -First 1 then keeps the first object.'),t('Get-Process の CPU はプロセスが累積で使った CPU 秒です。今この瞬間の CPU 使用率ではありません。長く動くプロセスほど大きくなることがあります。','The CPU property from Get-Process is cumulative processor time in seconds, not current CPU utilization. Longer-running processes can accumulate larger values.')],task:t('Get-Process を CPU の大きい順に並べ、先頭の 1 件を表示してください。','Sort Get-Process by CPU descending and display the first object.'),example:{command:'Get-Process | Sort-Object -Property CPU -Descending',note:t('この後に先頭 1 件の選択をつなぎます。','Add a selection of the first object after this sort.')},hints:[t('並べ替えの項目は CPU です。','Sort by CPU.'),t('-Descending と Select-Object -First 1 を使います。','Use -Descending and Select-Object -First 1.'),t('Get-Process | Sort-Object CPU -Descending | Select-Object -First 1 です。','Run Get-Process | Sort-Object CPU -Descending | Select-Object -First 1.')],solution:['Get-Process | Sort-Object -Property CPU -Descending | Select-Object -First 1'],success:t('順序と件数を指定し、数値の意味も確認できました。','You controlled order and count while understanding the number.'),verify:{pipelines:[[cmd('Get-Process'),cmd('Sort-Object',['CPU','-Descending']),cmd('Select-Object',['-First','1'],['NotesApp'])]]},question:quiz('NotesApp の CPU が最大です。言えることは？','NotesApp has the largest CPU value. What does that establish?',option('取得時点の累積 CPU 秒が、この一覧では最大。','It has the most accumulated CPU seconds in this snapshot.','瞬間的な負荷や応答不能の原因までは分かりません。','This does not establish current load or the cause of unresponsiveness.'),option('取得した瞬間に CPU を 125% 使用している。','It is using 125% CPU at the instant of collection.','CPU の単位は累積秒で、割合ではありません。','CPU is cumulative seconds, not a percentage.'),option('WorkingSet64 も全プロセス中で最大だと分かる。','Its WorkingSet64 must also be the largest of all processes.','CPU で並べ替えた結果だけでは、別の項目の順位は決まりません。','Sorting by CPU does not establish the ranking of another property.'))});
 
-  add({id:'measure-objects',track:'objects',title:t('件数と合計を求める','Count and sum values'),goal:t('Measure-Object でファイル数と合計サイズを調べる。','Use Measure-Object to count files and sum their sizes.'),explanation:[t('Measure-Object は件数や合計、平均などを返します。-Property Length -Sum ならファイルの Length を合計します。Length はバイト数です。','Measure-Object returns counts and aggregates. -Property Length -Sum adds file lengths, measured in bytes.'),t('フォルダー自身の Length はファイルと同じようには扱えません。集計の前に -File で対象をそろえます。','A directory’s Length is not a file size. Use -File to keep a consistent set before aggregating.')],task:t('C:\\Lab\\Logs 直下のファイルを取得し、Length の合計を Measure-Object で求めてください。','Get the files directly in C:\\Lab\\Logs and sum their Length using Measure-Object.'),example:{command:c`Get-ChildItem -Path C:\Lab -File | Measure-Object`,note:t('この例は件数です。課題では場所と集計する項目を指定します。','This counts files. Change the location and specify the property to sum.')},hints:[t('Get-ChildItem に -File を付けます。','Add -File to Get-ChildItem.'),t('Measure-Object -Property Length -Sum へ渡します。','Pipe to Measure-Object -Property Length -Sum.'),t('Get-ChildItem C:\\Lab\\Logs -File | Measure-Object -Property Length -Sum です。','Run Get-ChildItem C:\\Lab\\Logs -File | Measure-Object -Property Length -Sum.')],solution:[c`Get-ChildItem -Path C:\Lab\Logs -File | Measure-Object -Property Length -Sum`],success:t('集計対象と単位をそろえて合計を取得できました。','You measured a defined set using a consistent unit.'),verify:{pipelines:[[path('Get-ChildItem',c`C:\Lab\Logs`,[],['-File']),cmd('Measure-Object',['Length','-Sum'],['Count','Sum'])]]}});
+  add({id:'measure-objects',track:'objects',title:t('件数と合計を求める','Count and sum values'),goal:t('Measure-Object でファイル数と合計サイズを調べる。','Use Measure-Object to count files and sum their sizes.'),explanation:[t('Measure-Object は件数や合計、平均などを返します。-Property Length -Sum ならファイルの Length を合計します。Length はバイト数です。','Measure-Object returns counts and aggregates. -Property Length -Sum adds file lengths, measured in bytes.'),t('フォルダーは Length を持ちません。集計前に -File を指定すると対象が明確になります。Logs 直下はファイルだけなので、この課題では省略しても同じ結果です。PowerShell 7.3 以降の通常設定では、指定プロパティのない項目は集計から除外されます。','Directories do not have Length. Use -File to make the target set explicit. This Logs folder contains only files, so omitting it gives the same result here. Since PowerShell 7.3, items without the requested property are skipped under normal settings.')],task:t('C:\\Lab\\Logs 直下のファイルを取得し、Length の合計を Measure-Object で求めてください。','Get the files directly in C:\\Lab\\Logs and sum their Length using Measure-Object.'),example:{command:c`Get-ChildItem -Path C:\Lab -File | Measure-Object`,note:t('この例は件数です。課題では場所と集計する項目を指定します。','This counts files. Change the location and specify the property to sum.')},hints:[t('Get-ChildItem に -File を付けます。','Add -File to Get-ChildItem.'),t('Measure-Object -Property Length -Sum へ渡します。','Pipe to Measure-Object -Property Length -Sum.'),t('Get-ChildItem C:\\Lab\\Logs -File | Measure-Object -Property Length -Sum です。','Run Get-ChildItem C:\\Lab\\Logs -File | Measure-Object -Property Length -Sum.')],solution:[c`Get-ChildItem -Path C:\Lab\Logs -File | Measure-Object -Property Length -Sum`],success:t('集計対象と単位をそろえて合計を取得できました。','You measured a defined set using a consistent unit.'),verify:{pipelines:[either([path('Get-ChildItem',c`C:\Lab\Logs`,[],['-File']),{...cmd('Measure-Object',['Length','-Sum'],['Count','Sum']),objectIncludes:[{Count:2,Property:'Length'}]}],[{...path('Get-ChildItem',c`C:\Lab\Logs`),outputType:'System.IO.FileInfo'},{...cmd('Measure-Object',['Length','-Sum'],['Count','Sum']),objectIncludes:[{Count:2,Property:'Length'}]}])]}});
 
   add({id:'group-objects',track:'objects',title:t('同じ値でまとめる','Group matching values'),goal:t('状態別にまとめて件数を比較する。','Group by status and compare counts.'),explanation:[t('Group-Object は指定項目の値が同じオブジェクトをまとめます。Count はそのグループの件数、Name はグループの値です。','Group-Object groups objects sharing the same property value. Count is the size of the group; Name is the grouped value.'),t('件数の増減は調査の入口です。どのサービスが含まれるかを確認するには、元の一覧を Where-Object などで調べます。','Counts are a starting point. To identify the services in a group, filter the original list.')],task:t('Get-Service を Status ごとにまとめてください。','Group Get-Service by Status.'),example:{command:'Get-Service | Group-Object -Property StartType',note:t('課題では起動設定でなく、現在の状態でまとめます。','For the task, group by current status rather than startup mode.')},hints:[t('使うコマンドは Group-Object です。','Use Group-Object.'),t('項目名は Status です。','The property is Status.'),t('Get-Service | Group-Object -Property Status を実行します。','Run Get-Service | Group-Object -Property Status.')],solution:['Get-Service | Group-Object -Property Status'],success:t('状態ごとのまとまりを取得できました。','You obtained groups for each status.'),verify:{pipelines:[[cmd('Get-Service'),cmd('Group-Object',['Status'],['Running','Stopped','Count'])]]}});
 
@@ -799,7 +938,7 @@
 
   add({id:'preview-process-stop',track:'pc',title:t('終了の対象を予告する','Preview a process stop'),goal:t('終了する前に対象を見直し、実行と予告を区別する。','Review the target before stopping it and distinguish a preview from execution.'),explanation:[t('Stop-Process はプロセスを終了させます。未保存データを失う可能性があるため、対象と影響の確認が必要です。この課題では -WhatIf だけを使います。','Stop-Process terminates a process. Unsaved work can be lost, so check the target and impact. This exercise uses -WhatIf only.'),t('予告後にも同じ ID が取得できるか確かめると、今回の操作が終了を実行していないことを確認できます。','Querying the same ID after the preview lets you check that the process was not stopped.')],task:t('NotesApp を取得し、その ID 4320 の停止を -WhatIf で予告して、もう一度 ID 4320 を取得してください。','Find NotesApp, preview stopping ID 4320 with -WhatIf, then query ID 4320 again.'),example:{command:'Stop-Process -Id 4320 -WhatIf',note:t('この課題では -WhatIf を外しません。','Keep -WhatIf in this exercise.')},hints:[t('最初に Get-Process -Name NotesApp を実行します。','Start with Get-Process -Name NotesApp.'),t('Stop-Process -Id 4320 -WhatIf を使います。','Use Stop-Process -Id 4320 -WhatIf.'),t('最後に Get-Process -Id 4320 で対象が残ることを確認します。','Finish with Get-Process -Id 4320 to verify it remains.')],solution:['Get-Process -Name NotesApp','Stop-Process -Id 4320 -WhatIf','Get-Process -Id 4320'],success:t('対象の確認と、変更していないことの再確認ができました。','You checked the target and verified that no change was applied.'),verify:{orderedCommands:[cmd('Get-Process',['NotesApp']),cmd('Stop-Process',['4320','-WhatIf'],['What if']),cmd('Get-Process',['-Id','4320'],['NotesApp'])],state:{'pc.processes.0.Id':4320}}});
 
-  add({id:'stop-one-process',track:'pc',title:t('確認したアプリだけを終了する','Stop the verified app'),goal:t('終了前の照合と終了後の確認を一組にする。','Pair target verification with a check after stopping.'),explanation:[t('この演習では NotesApp の作業は保存済みで、利用者から終了の了解を得ています。確認したプロセスだけを ID またはパイプで渡して対象にします。実際の環境では権限や業務への影響も確認します。','For this exercise, the user has saved their work and approved stopping NotesApp. Target only the verified process, by ID or by passing it through the pipeline. In a real environment, check permissions and operational impact too.'),t('Stop-Process は通常、成功しても表示がありません。無言を成功の証拠にせず、Get-Process で対象がなくなったことを再確認します。','Stop-Process normally produces no output on success. Treat silence as insufficient evidence and query the process list again.')],task:t('NotesApp を名前で確認し、ID 4320 を停止してから、全プロセスを取得して対象が一覧から消えたことを確かめてください。','Find NotesApp by name, stop ID 4320, then query all processes and verify it is absent.'),example:{command:'Get-Process -Name NotesApp',note:t('終了操作より先に対象を確認します。','Verify the target before stopping it.')},hints:[t('Get-Process -Name NotesApp で ID を確かめます。','Check the ID with Get-Process -Name NotesApp.'),t('Stop-Process -Id 4320、または Get-Process -Name NotesApp | Stop-Process で対象だけを停止します。','Stop only the target with Stop-Process -Id 4320 or Get-Process -Name NotesApp | Stop-Process.'),t('最後は引数なしの Get-Process で残ったプロセスを表示します。','Finish with Get-Process without arguments to list remaining processes.')],solution:['Get-Process -Name NotesApp','Stop-Process -Id 4320','Get-Process'],success:t('確認した一件だけを終了し、結果を再確認できました。','You stopped the verified instance and checked the result.'),verify:{orderedCommands:[cmd('Get-Process',['NotesApp']),afterChange({...cmd('Stop-Process',['4320']),argsExcludes:['-WhatIf']}),{...cmd('Get-Process',[],['explorer','pwsh']),argsEqual:[],outputExcludes:['NotesApp']}],state:{'pc.processes.0.ProcessName':'explorer'}}});
+  add({id:'stop-one-process',track:'pc',title:t('確認したアプリだけを終了する','Stop the verified app'),goal:t('終了前の照合と終了後の確認を一組にする。','Pair target verification with a check after stopping.'),explanation:[t('この演習では NotesApp の作業は保存済みで、利用者から終了の了解を得ています。確認したプロセスを ID、名前、またはパイプで指定します。名前指定は同名のプロセスすべてが対象になるため、この演習では NotesApp が一件だけであることを確認します。実際の環境では権限や業務への影響も確認します。','For this exercise, the user has saved their work and approved stopping NotesApp. Target the verified process by ID, name, or pipeline input. A name can match multiple running instances, so verify that this exercise has only one NotesApp process. In a real environment, check permissions and operational impact too.'),t('Stop-Process は通常、成功しても表示がありません。無言を成功の証拠にせず、Get-Process で対象がなくなったことを再確認します。','Stop-Process normally produces no output on success. Treat silence as insufficient evidence and query the process list again.')],task:t('NotesApp を名前で確認し、ID 4320 のプロセスを停止してから、全プロセスを取得して対象が一覧から消えたことを確かめてください。','Find NotesApp by name, stop the process with ID 4320, then query all processes and verify it is absent.'),example:{command:'Get-Process -Name NotesApp',note:t('終了操作より先に対象を確認します。','Verify the target before stopping it.')},hints:[t('Get-Process -Name NotesApp で ID を確かめます。','Check the ID with Get-Process -Name NotesApp.'),t('Stop-Process -Id 4320、Stop-Process -Name NotesApp、または Get-Process -Name NotesApp | Stop-Process で対象を停止します。','Stop the target with Stop-Process -Id 4320, Stop-Process -Name NotesApp, or Get-Process -Name NotesApp | Stop-Process.'),t('最後は引数なしの Get-Process で残ったプロセスを表示します。','Finish with Get-Process without arguments to list remaining processes.')],solution:['Get-Process -Name NotesApp','Stop-Process -Id 4320','Get-Process'],success:t('確認した一件だけを終了し、結果を再確認できました。','You stopped the verified instance and checked the result.'),verify:{orderedCommands:[cmd('Get-Process',['NotesApp']),afterChange({...cmd('Stop-Process',['4320']),argsExcludes:['-WhatIf']}),{...cmd('Get-Process',[],['explorer','pwsh']),argsEqual:[],outputExcludes:['NotesApp']}],state:{'pc.processes.0.ProcessName':'explorer'}}});
 
   add({id:'inspect-service',track:'pc',title:t('サービスの状態と起動設定','Service status and startup mode'),goal:t('現在の状態と、起動方法の設定を区別する。','Distinguish current status from startup configuration.'),session:{scenario:'service-stopped'},explanation:[t('Get-Service はサービスの状態を返します。Status は今の状態、StartType は起動方法の設定です。Automatic でも、停止していることがあります。','Get-Service reports service information. Status is current state; StartType is startup configuration. An automatic service can be stopped.'),t('この環境では印刷サービス Spooler が停止しています。まず状態と設定を読む練習です。開始操作は次の課題で扱います。','In this scenario, the Print Spooler is stopped. First practice reading its status and configuration; a later lesson covers starting it.')],task:t('Spooler の Name、Status、StartType を選び、現在の状態と設定を読み取ってください。','Select Name, Status, and StartType for Spooler and interpret its state and configuration.'),example:{command:'Get-Service -Name Spooler',note:t('見たい項目を Select-Object で指定します。','Choose the needed properties with Select-Object.')},hints:[t('対象は Get-Service -Name Spooler です。','Use Get-Service -Name Spooler.'),t('Select-Object Name,Status,StartType をつなぎます。','Pipe to Select-Object Name,Status,StartType.'),t('Get-Service -Name Spooler | Select-Object Name,Status,StartType です。','Run Get-Service -Name Spooler | Select-Object Name,Status,StartType.')],solution:['Get-Service -Name Spooler | Select-Object Name,Status,StartType'],success:t('設定と現在状態を分けて読めました。','You distinguished the configuration from the present state.'),verify:{pipelines:[[cmd('Get-Service',['Spooler']),cmd('Select-Object',['Name,Status,StartType'],['Stopped','Automatic'])]]},question:quiz('この出力をどう説明する？','How would you describe this output?',option('自動起動の設定だが、現在は停止している。','Startup is automatic, but it is currently stopped.','Automatic と Stopped は別の項目の値なので両立します。','Automatic and Stopped describe different properties and can coexist.'),option('自動起動なので、現在も印刷サービスは稼働中。','It must be running because startup is automatic.','現在状態は Status の Stopped を読みます。','Read Stopped in Status for the current state.'),option('現在停止中なので、起動設定は Disabled。','Its startup mode must be Disabled because it is stopped.','表示された StartType は Automatic です。','The displayed StartType is Automatic.'))});
 
@@ -809,7 +948,7 @@
 
   add({id:'disk-free-space',track:'pc',title:t('空き容量を調べる','Inspect free disk space'),goal:t('ディスク容量とファイルサイズを区別する。','Distinguish disk free space from file sizes.'),session:{scenario:'low-disk'},explanation:[t('Win32_LogicalDisk の FreeSpace は空き容量、Size はドライブ容量で、どちらもバイト数です。DeviceID で C: や D: を区別します。','Win32_LogicalDisk exposes FreeSpace and Size in bytes. DeviceID identifies drives such as C: or D:.'),t('ファイル一覧で見える Length の合計は、ドライブの空き容量と同じ情報ではありません。隠れた領域や対象外のフォルダーもあるためです。','Summing file Length values is not the same measurement as drive free space; there can be other folders and storage areas.')],task:t('Win32_LogicalDisk から DeviceID が C: の行だけを選び、DeviceID、FreeSpace、Size を表示してください。','Query Win32_LogicalDisk, keep DeviceID C:, and display DeviceID, FreeSpace, and Size.'),example:{command:'Get-CimInstance -ClassName Win32_LogicalDisk',note:t('複数のドライブから対象を選びます。','Choose the intended drive from the results.')},hints:[t('Where-Object DeviceID -eq C: で選びます。','Filter with Where-Object DeviceID -eq C:.'),t('Select-Object で DeviceID,FreeSpace,Size を選びます。','Select DeviceID,FreeSpace,Size.'),t('Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object DeviceID -eq C: | Select-Object DeviceID,FreeSpace,Size の形です。','Use Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object DeviceID -eq C: | Select-Object DeviceID,FreeSpace,Size.')],solution:['Get-CimInstance -ClassName Win32_LogicalDisk | Where-Object DeviceID -eq C: | Select-Object DeviceID,FreeSpace,Size'],success:t('対象ドライブと数値の意味を区別できました。','You identified the drive and distinguished the two capacity values.'),verify:{pipelines:[[cmd('Get-CimInstance',['Win32_LogicalDisk']),cmd('Where-Object',['DeviceID','-eq','C:']),{...cmd('Select-Object',['DeviceID,FreeSpace,Size'],['C:','2147483648']),outputCount:1}]]},question:quiz('FreeSpace の 2147483648 は何を表す？','What does FreeSpace 2147483648 represent?',option('C: の空き容量をバイトで表した値。','Free space on C:, expressed in bytes.','この値は 2 GiB です。Size は別の容量の項目です。','This is 2 GiB. Size is a separate capacity property.'),option('C: にある最大ファイルのバイト数。','The byte length of the largest file on C:.','これはドライブの情報で、個別ファイルの Length ではありません。','This is drive data, not a file’s Length.'),option('C: の使用済み容量をバイトで表した値。','Used space on C:, expressed in bytes.','FreeSpace は使用済みではなく空き容量です。','FreeSpace is available space, not used space.'))});
 
-  add({id:'read-system-events',track:'pc',title:t('最近のイベントを読む','Read recent system events'),goal:t('イベントの時刻・ID・メッセージを合わせて読む。','Read event time, ID, and message together.'),session:{scenario:'service-stopped'},explanation:[t('Get-WinEvent は Windows のイベントログを取得します。-LogName System でログを選び、-MaxEvents 3 で件数を絞ります。既定では新しいイベントから取得します。','Get-WinEvent reads Windows event logs. -LogName System chooses a log and -MaxEvents 3 limits the count. Results are newest first by default.'),t('ログは過去に起きたことの記録です。停止の記録があっても、現在も停止しているかは Get-Service で確かめます。この教材のイベントは固定した架空データで、メッセージは学習用に簡略化しています。','Logs record past events. A stop event does not establish current service status; query Get-Service for that. These events are fixed fictional data with messages simplified for learning.')],task:t('System ログの最新 3 件を取得し、TimeCreated、Id、Message を表示してください。','Get the latest three System events and display TimeCreated, Id, and Message.'),example:{command:'Get-WinEvent -LogName System -MaxEvents 1',note:t('課題では件数を 3 にして、表示する項目を選びます。','Use a count of 3 and choose the requested properties.')},hints:[t('-LogName System -MaxEvents 3 を指定します。','Specify -LogName System -MaxEvents 3.'),t('Select-Object TimeCreated,Id,Message をつなぎます。','Pipe to Select-Object TimeCreated,Id,Message.'),t('Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message です。','Run Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message.')],solution:['Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message'],success:t('時刻と内容を持つ調査の手がかりを取得できました。','You collected timestamped evidence for the investigation.'),verify:{pipelines:[[cmd('Get-WinEvent',['System','-MaxEvents','3']),cmd('Select-Object',['TimeCreated,Id,Message'],['Spooler'])]]},question:quiz('Spooler 停止のイベントから、現在の状態は分かる？','Does a Spooler stop event establish its current status?',option('その時刻の停止は分かる。現在状態は別に取得する。','It records a stop at that time; query current status separately.','ログと現在状態は時間の対象が違います。','The event and current-state query refer to different times.'),option('最新 3 件に停止があれば、現在も停止中と確定する。','A stop among the latest three events proves it is still stopped.','その後の変化や別ログの記録がある可能性があります。','Later changes or records elsewhere may exist.'),option('停止イベントを読み出すと、サービスも停止する。','Reading the stop event also stops the service.','Get-WinEvent は取得操作で、サービス変更は行いません。','Get-WinEvent reads data; it does not change the service.'))});
+  add({id:'read-system-events',track:'pc',title:t('最近のイベントを読む','Read recent system events'),goal:t('イベントの時刻・ID・メッセージを合わせて読む。','Read event time, ID, and message together.'),session:{scenario:'service-stopped'},explanation:[t('Get-WinEvent は Windows のイベントログを取得します。-LogName System でログを選び、-MaxEvents 3 で件数を絞ります。既定では新しいイベントから取得します。件数を指定しない実機では大量のログが表示されることがあります。この教材は 12 件の架空ログです。Select-Object -First 3 でも先頭の 3 件を選べます。','Get-WinEvent reads Windows event logs. -LogName System chooses a log and -MaxEvents 3 limits the count. Results are newest first by default. On a real machine, omitting the limit can display many events. This room contains 12 fictional events. Select-Object -First 3 can also keep the latest three.'),t('ログは過去に起きたことの記録です。停止の記録があっても、現在も停止しているかは Get-Service で確かめます。この教材のイベントは固定した架空データで、メッセージは学習用に簡略化しています。','Logs record past events. A stop event does not establish current service status; query Get-Service for that. These events are fixed fictional data with messages simplified for learning.')],task:t('System ログの最新 3 件を取得し、TimeCreated、Id、Message を表示してください。','Get the latest three System events and display TimeCreated, Id, and Message.'),example:{command:'Get-WinEvent -LogName System -MaxEvents 1',note:t('課題では件数を 3 にして、表示する項目を選びます。','Use a count of 3 and choose the requested properties.')},hints:[t('-LogName System -MaxEvents 3 を指定します。','Specify -LogName System -MaxEvents 3.'),t('Select-Object TimeCreated,Id,Message をつなぎます。','Pipe to Select-Object TimeCreated,Id,Message.'),t('Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message です。','Run Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message.')],solution:['Get-WinEvent -LogName System -MaxEvents 3 | Select-Object TimeCreated,Id,Message'],success:t('時刻と内容を持つ調査の手がかりを取得できました。','You collected timestamped evidence for the investigation.'),verify:{pipelines:[displayedEvents()]},question:quiz('Spooler 停止のイベントから、現在の状態は分かる？','Does a Spooler stop event establish its current status?',option('その時刻の停止は分かる。現在状態は別に取得する。','It records a stop at that time; query current status separately.','ログと現在状態は時間の対象が違います。','The event and current-state query refer to different times.'),option('最新 3 件に停止があれば、現在も停止中と確定する。','A stop among the latest three events proves it is still stopped.','その後の変化や別ログの記録がある可能性があります。','Later changes or records elsewhere may exist.'),option('停止イベントを読み出すと、サービスも停止する。','Reading the stop event also stops the service.','Get-WinEvent は取得操作で、サービス変更は行いません。','Get-WinEvent reads data; it does not change the service.'))});
 
   add({id:'save-pc-inventory',track:'pc',title:t('端末情報を共有できる形にする','Save a shareable PC inventory'),goal:t('端末名と所属の情報を CSV にまとめる。','Export computer name and domain information as CSV.'),explanation:[t('Win32_ComputerSystem は端末の名前や所属ドメインなどの情報を持ちます。今回はローカルの架空 PC 一台を調べます。','Win32_ComputerSystem contains information such as computer name and domain. This exercise inspects one fictional local PC.'),t('Domain の表示だけで、ドメインコントローラーへ現在接続できるとは断定できません。構成の情報と到達性は分けて報告します。','A Domain value alone does not verify current connectivity to a domain controller. Report configuration separately from reachability.')],task:t('Win32_ComputerSystem の Name と Domain を Reports\\pc.csv に CSV 保存し、読み戻してください。','Export Name and Domain from Win32_ComputerSystem to Reports\\pc.csv, then import it again.'),example:{command:'Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Name,Domain',note:t('この結果を CSV 保存します。','Export this result as CSV.')},hints:[t('Get-CimInstance で対象クラスを取得します。','Query the class with Get-CimInstance.'),t('Name,Domain を選んで Export-Csv へ渡します。','Select Name,Domain and pipe to Export-Csv.'),t('C:\\Lab\\Reports\\pc.csv に保存し、Import-Csv で読み戻します。','Save to C:\\Lab\\Reports\\pc.csv and reimport it.')],solution:[c`Get-CimInstance -ClassName Win32_ComputerSystem | Select-Object Name,Domain | Export-Csv -Path C:\Lab\Reports\pc.csv -NoTypeInformation -Encoding utf8`,c`Import-Csv -Path C:\Lab\Reports\pc.csv`],success:t('端末の構成情報を保存し、再利用できることを確認しました。','You saved configuration information and verified its reuse.'),verify:{pipelines:[[cmd('Get-CimInstance',['Win32_ComputerSystem']),cmd('Select-Object',['Name,Domain']),path('Export-Csv',c`C:\Lab\Reports\pc.csv`)]],commands:[path('Import-Csv',c`C:\Lab\Reports\pc.csv`,['PC-014','corp.example'])],files:[{path:c`C:\Lab\Reports\pc.csv`,includes:['Name','Domain','PC-014','corp.example']}]}});
 
@@ -831,7 +970,7 @@
 
   add({id:'capstone-web-503',track:'network',title:t('総合演習：ポータルが使えない','Investigation: the portal is unavailable'),goal:t('DNS・TCP・HTTP の観察を一つの報告にまとめる。','Combine DNS, TCP, and HTTP observations in a report.'),session:{scenario:'web-503'},explanation:[t('問い合わせ：「社内ポータルを開けない」。名前解決、TCP 接続、HTTP 応答を一つずつ確認します。成功した試験があっても、すべて正常とはまとめません。','Request: “The intranet portal will not open.” Check DNS, TCP, and HTTP one at a time. One successful test does not establish overall health.'),t('Invoke-WebRequest は通常、503 を受け取るとエラーにします。PowerShell 7 の -SkipHttpErrorCheck はエラー状態でも応答を調べるための指定で、サービスを修復する操作ではありません。5.1 にはこの指定がありません。','Invoke-WebRequest normally reports an error for 503. PowerShell 7’s -SkipHttpErrorCheck lets you inspect an error response; it does not repair the service. This parameter is unavailable in Windows PowerShell 5.1.')],task:t('ポータルの DNS と TCP 443 を確認し、通常の Invoke-WebRequest で 503 エラーを観察した後、-SkipHttpErrorCheck で StatusCode と Headers を表示してください。','Check the portal’s DNS and TCP 443. Observe a 503 error with normal Invoke-WebRequest, then display StatusCode and Headers using -SkipHttpErrorCheck.'),example:{command:'Invoke-WebRequest -Uri https://intranet.corp.example -SkipHttpErrorCheck',note:t('エラー応答も内容を調べるために受け取る指定です。','This lets you inspect the content of an error response.')},hints:[t('Resolve-DnsName と Test-NetConnection -Port 443 で下の層を確かめます。','Check the lower layers with Resolve-DnsName and Test-NetConnection -Port 443.'),t('最初の Invoke-WebRequest は -SkipHttpErrorCheck なしで実行します。状態とヘッダーの観察には -Method Head も使えます。','Run the first Invoke-WebRequest without -SkipHttpErrorCheck. You can also use -Method Head to inspect the status and headers.'),t('次に -SkipHttpErrorCheck を付け、Select-Object StatusCode,Headers へ渡します。','Then add -SkipHttpErrorCheck and pipe to Select-Object StatusCode,Headers.')],solution:['Resolve-DnsName -Name intranet.corp.example','Test-NetConnection -ComputerName intranet.corp.example -Port 443','Invoke-WebRequest -Uri https://intranet.corp.example','Invoke-WebRequest -Uri https://intranet.corp.example -SkipHttpErrorCheck | Select-Object StatusCode,Headers'],success:t('到達できる層と HTTP の障害を区別して報告できました。','You distinguished network reachability from the HTTP service error.'),verify:{commands:[cmd('Resolve-DnsName',['intranet.corp.example'],['10.20.0.20']),cmd('Test-NetConnection',['intranet.corp.example','-Port','443'],['True'])],orderedCommands:[{...cmd('Invoke-WebRequest',['https://intranet.corp.example']),argsExcludes:['-SkipHttpErrorCheck'],expectCode:1,errorIncludes:['503']},cmd('Invoke-WebRequest',['https://intranet.corp.example','-SkipHttpErrorCheck'])],pipelines:[[cmd('Invoke-WebRequest',['-SkipHttpErrorCheck']),cmd('Select-Object',['StatusCode,Headers'],['503','Retry-After'])]]},question:quiz('この問い合わせへの報告として適切なのは？','Which report matches the evidence?',option('名前解決と TCP は成功。HTTP 503 を記録し、Web 側の状態を調べる。','DNS and TCP work. Record HTTP 503 and investigate the web service path.','503 は HTTP 応答です。発生元や復旧の確認は追加調査が必要です。','503 is an HTTP response. Its source and recovery still need investigation.'),option('TCP が成功したので、ポータル利用は復旧したと伝える。','Report that portal access is restored because TCP succeeded.','HTTP は 503 です。TCP の成功とアプリの正常は別です。','HTTP returned 503. TCP connectivity is separate from application health.'),option('SkipHttpErrorCheck によってサーバーのエラーを解除できた。','SkipHttpErrorCheck cleared the server’s error condition.','クライアント側のエラーの扱いを変えただけで、修復ではありません。','It only changed client-side error handling; it did not repair the service.'))});
 
-  add({id:'capstone-printing',track:'network',title:t('総合演習：印刷サービスを復旧する','Investigation: recover the print service'),goal:t('過去のログと現在状態を読み、許可された変更後に確認する。','Read historical logs and current status, then verify an approved change.'),session:{scenario:'service-stopped'},explanation:[t('問い合わせ：「この PC から印刷できない」。System ログと Spooler の状態を確認します。この演習では停止理由の確認と開始の許可が済んでいます。実機では権限、影響、運用手順に従います。','Request: “This PC cannot print.” Inspect the System log and Spooler state. For this exercise, the stop reason has been reviewed and starting it is approved. On a real PC, follow permission and operational procedures.'),t('開始後はサービスを再取得し、その結果を CSV に保存して引き継ぎます。Running の確認と、テスト印刷の成功は別なので、未確認事項も報告します。','After starting the service, query it again and export that result for handoff. Running does not establish a successful test print; report that unverified step too.')],task:t('System の最新 3 件と Spooler の停止を確認し、Start-Service で開始してください。再取得した Name と Status を Reports\\printing.csv に保存して読み戻し、適切な引き継ぎを選んでください。','Inspect the latest three System events and confirm Spooler is stopped. Start it, export a fresh Name and Status to Reports\\printing.csv, reimport the file, and choose an accurate handoff.'),example:{command:'Get-Service -Name Spooler | Select-Object Name,Status',note:t('変更前と変更後で同じ対象を取得します。','Query the same target before and after the change.')},hints:[t('Get-WinEvent -LogName System -MaxEvents 3 と Get-Service -Name Spooler を使います。','Use Get-WinEvent -LogName System -MaxEvents 3 and Get-Service -Name Spooler.'),t('Start-Service -Name Spooler の後、Get-Service をもう一度実行します。','After Start-Service -Name Spooler, query Get-Service again.'),t('再取得した Name,Status を printing.csv に Export-Csv し、Import-Csv で読み戻します。','Export the freshly queried Name,Status to printing.csv, then reimport it.')],solution:['Get-WinEvent -LogName System -MaxEvents 3','Get-Service -Name Spooler','Start-Service -Name Spooler',c`Get-Service -Name Spooler | Select-Object Name,Status | Export-Csv -Path C:\Lab\Reports\printing.csv -NoTypeInformation -Encoding utf8`,c`Import-Csv -Path C:\Lab\Reports\printing.csv`],success:t('変更の根拠、復旧後の状態、未確認事項をそろえて引き継げます。','You can hand off the rationale, verified service state, and remaining check.'),verify:{commands:[cmd('Get-WinEvent',['System','-MaxEvents','3']),path('Import-Csv',c`C:\Lab\Reports\printing.csv`,['Spooler','Running'])],orderedCommands:[cmd('Get-Service',['Spooler'],['Stopped']),afterChange({...cmd('Start-Service',['Spooler']),argsExcludes:['-WhatIf']}),cmd('Get-Service',['Spooler'],['Running'])],pipelines:[[cmd('Get-Service',['Spooler'],['Running']),cmd('Select-Object',['Name,Status']),path('Export-Csv',c`C:\Lab\Reports\printing.csv`)]],files:[{path:c`C:\Lab\Reports\printing.csv`,includes:['Spooler','Running']}],state:{'pc.services.0.Status':'Running'}},question:quiz('引き継ぎに書くべき内容は？','Which handoff statement fits the evidence?',option('Spooler の稼働を再確認し保存済み。実際のテスト印刷は未実施。','Spooler is verified running and the result is saved; a test print is still pending.','確認できた状態と、利用者の作業結果を分けています。','This separates verified service state from the user’s actual printing outcome.'),option('Running なので、利用者の印刷ジョブも完了済み。','Because it is Running, the user’s print job is complete.','ジョブの結果やプリンターの状態はまだ確認していません。','The print job and printer state have not yet been checked.'),option('CSV を保存したので、停止の原因も取り除かれた。','Saving the CSV also removed the cause of the stop.','保存は記録です。原因の解消を示す証拠ではありません。','Saving a report is record keeping, not evidence that the cause was removed.'))});
+  add({id:'capstone-printing',track:'network',title:t('総合演習：印刷サービスを復旧する','Investigation: recover the print service'),goal:t('過去のログと現在状態を読み、許可された変更後に確認する。','Read historical logs and current status, then verify an approved change.'),session:{scenario:'service-stopped'},explanation:[t('問い合わせ：「この PC から印刷できない」。System ログと Spooler の状態を確認します。この演習では停止理由の確認と開始の許可が済んでいます。実機では権限、影響、運用手順に従います。','Request: “This PC cannot print.” Inspect the System log and Spooler state. For this exercise, the stop reason has been reviewed and starting it is approved. On a real PC, follow permission and operational procedures.'),t('開始後はサービスを再取得し、その結果を CSV に保存して引き継ぎます。Running の確認と、テスト印刷の成功は別なので、未確認事項も報告します。','After starting the service, query it again and export that result for handoff. Running does not establish a successful test print; report that unverified step too.')],task:t('System の最新 3 件と Spooler の停止を確認し、Start-Service で開始してください。再取得した Name と Status を Reports\\printing.csv に保存して読み戻し、適切な引き継ぎを選んでください。','Inspect the latest three System events and confirm Spooler is stopped. Start it, export a fresh Name and Status to Reports\\printing.csv, reimport the file, and choose an accurate handoff.'),example:{command:'Get-Service -Name Spooler | Select-Object Name,Status',note:t('変更前と変更後で同じ対象を取得します。','Query the same target before and after the change.')},hints:[t('Get-WinEvent -LogName System -MaxEvents 3 と Get-Service -Name Spooler を使います。','Use Get-WinEvent -LogName System -MaxEvents 3 and Get-Service -Name Spooler.'),t('Start-Service -Name Spooler の後、Get-Service をもう一度実行します。','After Start-Service -Name Spooler, query Get-Service again.'),t('再取得した Name,Status を printing.csv に Export-Csv し、Import-Csv で読み戻します。','Export the freshly queried Name,Status to printing.csv, then reimport it.')],solution:['Get-WinEvent -LogName System -MaxEvents 3','Get-Service -Name Spooler','Start-Service -Name Spooler',c`Get-Service -Name Spooler | Select-Object Name,Status | Export-Csv -Path C:\Lab\Reports\printing.csv -NoTypeInformation -Encoding utf8`,c`Import-Csv -Path C:\Lab\Reports\printing.csv`],success:t('変更の根拠、復旧後の状態、未確認事項をそろえて引き継げます。','You can hand off the rationale, verified service state, and remaining check.'),verify:{commands:[path('Import-Csv',c`C:\Lab\Reports\printing.csv`,['Spooler','Running'])],orderedCommands:[cmd('Get-Service',['Spooler'],['Stopped']),afterChange({...cmd('Start-Service',['Spooler']),argsExcludes:['-WhatIf']}),cmd('Get-Service',['Spooler'],['Running'])],pipelines:[either([systemEvents(true)],[systemEvents(),firstThree()]),[cmd('Get-Service',['Spooler'],['Running']),cmd('Select-Object',['Name,Status']),path('Export-Csv',c`C:\Lab\Reports\printing.csv`)]],files:[{path:c`C:\Lab\Reports\printing.csv`,includes:['Spooler','Running']}],state:{'pc.services.0.Status':'Running'}},question:quiz('引き継ぎに書くべき内容は？','Which handoff statement fits the evidence?',option('Spooler の稼働を再確認し保存済み。実際のテスト印刷は未実施。','Spooler is verified running and the result is saved; a test print is still pending.','確認できた状態と、利用者の作業結果を分けています。','This separates verified service state from the user’s actual printing outcome.'),option('Running なので、利用者の印刷ジョブも完了済み。','Because it is Running, the user’s print job is complete.','ジョブの結果やプリンターの状態はまだ確認していません。','The print job and printer state have not yet been checked.'),option('CSV を保存したので、停止の原因も取り除かれた。','Saving the CSV also removed the cause of the stop.','保存は記録です。原因の解消を示す証拠ではありません。','Saving a report is record keeping, not evidence that the cause was removed.'))});
 
   const references = [
     {title:t('Microsoft Learn — ヘルプの取得','Microsoft Learn — Get-Help'),url:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/get-help'},
@@ -847,7 +986,7 @@
     {title:t('Microsoft Learn — HTTP 応答を調べる','Microsoft Learn — Invoke-WebRequest'),url:'https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest'},
     {title:t('Microsoft Learn — Windows PowerShell 5.1 と PowerShell 7 の違い','Microsoft Learn — Windows PowerShell and PowerShell 7 differences'),url:'https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell'}
   ];
-  return {version:'0.1.0',tracks,lessons,references};
+  return {version:'0.1.1',tracks,lessons,references};
 });
 
 ;
@@ -879,11 +1018,16 @@
       return number ? String(Number(number[1]) * ({kb:1024,mb:1048576,gb:1073741824}[number[2]?.toLowerCase()] || 1)) : arg;
     });
   }
-  function canonicalArgs(name, args) {
+  function canonicalArgs(name, args, inputType='') {
     const propertyList = ['select-object','format-table','format-list'].includes(name);
-    if (name === 'where-object') args = filterArgs(args);
+    const process=inputType==='System.Diagnostics.Process', aliases={name:'processname',ws:'workingset64',handles:'handlecount',si:'sessionid'};
+    if (name === 'where-object') {
+      args = filterArgs(args);
+      const propertyIndex=args.findIndex(arg=>/^-(eq|ne|gt|ge|lt|le|like)$/i.test(arg))-1;
+      if(process && propertyIndex>=0)args=args.map((arg,i)=>i===propertyIndex?(aliases[String(arg).toLowerCase()]||arg):arg);
+    }
     return args.flatMap(arg => propertyList
-      ? String(arg).toLowerCase().split(',').map(value => value.trim()).filter(Boolean)
+      ? String(arg).toLowerCase().split(',').map(value => value.trim()).filter(Boolean).map(value=>process?(aliases[value]||value):value)
       : [String(arg).toLowerCase()]);
   }
   function pipelineTarget(name, trace, expected) {
@@ -897,25 +1041,37 @@
     return trace.inputObjects.every(object => object && Object.hasOwn(object,binding.property) &&
       binding.valid(object[binding.property]) && String(object[binding.property]).toLowerCase() === expected[0]);
   }
+  function resolvedProcessTarget(name, trace, expected) {
+    // Name patterns and pipeline properties can resolve to the same PID.
+    // New traces record the actual bound targets; old progress can still use
+    // its original argument/pipeline evidence when that optional field is absent.
+    if (name !== 'stop-process' || expected.length !== 1 || !/^\d+$/.test(expected[0]) ||
+      trace.targetObjects === undefined) return null;
+    return Array.isArray(trace.targetObjects) && trace.targetObjects.length > 0 &&
+      trace.targetObjects.every(object => object && Number.isInteger(object.Id) && String(object.Id) === expected[0]);
+  }
   function matches(c, trace, lineCode) {
+    if (c.anyOf) return c.anyOf.some(alternative=>matches(alternative,trace,lineCode));
     const name = c.name.toLowerCase().replace(/\.exe$/, '');
     const expectedCode = c.expectCode === undefined ? 0 : c.expectCode;
     if (trace.name !== name || trace.code !== expectedCode || lineCode !== expectedCode) return false;
-    const args = canonicalArgs(name, trace.args || []);
+    const args = canonicalArgs(name, trace.args || [], trace.inputType);
     if (arr(c.argsExcludes).some(value => args.includes(String(value).toLowerCase()))) return false;
     const contains = arr(c.contains).every(value => {
-      const expected = canonicalArgs(name, [String(value)]);
+      const expected = canonicalArgs(name, [String(value)], trace.inputType);
+      const targetMatch = resolvedProcessTarget(name,trace,expected);
+      if (targetMatch !== null) return targetMatch;
       if (expected.every(v=>args.includes(v))) return true;
       if (pipelineTarget(name,trace,expected)) return true;
       // A phrase can be one quoted argument or a complete sequence of arguments.
       // Neither IPs, host names, flags, nor file names use substring matching.
       if (!/\s/.test(value)) return false;
-      const words = canonicalArgs(name, String(value).split(/\s+/));
+      const words = canonicalArgs(name, String(value).split(/\s+/), trace.inputType);
       return args.some((_,i)=>words.every((v,j)=>args[i+j]===v));
     });
     if (!contains) return false;
     if (c.argsEqual !== undefined) {
-      const expected = canonicalArgs(name, c.argsEqual);
+      const expected = canonicalArgs(name, c.argsEqual, trace.inputType);
       if (expected.length !== args.length || !expected.every((v,i)=>args[i]===v)) return false;
     }
     const paths = trace.resolvedPaths || (trace.args || []).filter(arg=>/^[CD]:[\\/]/i.test(arg));
@@ -961,6 +1117,22 @@
     return evidence;
   }
   function historyEvidence(lesson, history) { return history.reduce((result,entry)=>observe(lesson,entry,result),emptyEvidence(lesson)); }
+  function pipelineProgress(pipeline, history, completed) {
+    const alternatives=Array.isArray(pipeline)?[pipeline]:pipeline.anyOf;
+    let best={alternative:0,count:0,complete:false};
+    alternatives.forEach((steps,alternative)=>{
+      for(const entry of history)for(let start=0;start<(entry.trace||[]).length;start++){
+        let count=0;
+        while(count<steps.length && entry.trace[start+count] &&
+          matches(steps[count],entry.trace[start+count],completed?entry.code:entry.trace[start+count].code))count++;
+        const complete=count===steps.length;
+        if((completed && complete && !best.complete) ||
+          (!(completed && best.complete && !complete) && count>best.count))best={alternative,count,complete};
+      }
+    });
+    const steps=alternatives[best.alternative];
+    return {alternative:best.alternative,stages:steps.map((_,i)=>completed || i<best.count)};
+  }
   function grade(lesson, session, answer, savedEvidence) {
     const checks = lesson.verify || {};
     const collected = historyEvidence(lesson,session.history || []);
@@ -999,7 +1171,8 @@
     });
     const commandOk = commands.every(Boolean) && pipelines.every(Boolean) && cwd && files.every(Boolean) && ordered && stateOk;
     const answerOk = !lesson.question || answer === lesson.question.answer;
-    return { ok: commandOk && answerOk, commandOk, answerOk, commands, pipelines, cwd, files, ordered, stateOk };
+    return { ok: commandOk && answerOk, commandOk, answerOk, commands, pipelines, cwd, files, ordered, stateOk,
+      orderedCount:collected.ordered,pipelineStages:(checks.pipelines || []).map((pipeline,i)=>pipelineProgress(pipeline,session.history || [],pipelines[i])) };
   }
   function empty() {
     return { schema: 'powershellroom.progress', version: VERSION, language: 'ja', activeId: '', completed: {}, checkpoints: {} };
@@ -1097,7 +1270,14 @@
     evidenceHint: ['「やってみよう」の条件を確認してください。', 'Follow the task to collect the evidence.'], evidenceQuestion: ['結果を読んで、左の問題に答えましょう。', 'Read the output and answer the lesson question.'],
     completedTitle: ['このレッスンは完了です', 'Lesson completed'], completedText: ['次のレッスンへ進むか、この環境で練習を続けられます。', 'Continue to the next lesson or keep practicing here.'],
     recordTitle: ['完了記録あり · 復習中', 'Previously completed · Practicing again'], recordText: ['完了記録は保存されています。現在の環境で課題を再確認する場合は、条件を満たしてから「結果を確認する」を押してください。', 'Your completion record is saved. To verify this environment again, meet the task requirements and check your work.'],
-    notYet: ['もうひとつ確かめましょう', 'One more thing to check'], needCommands: ['必要な実行結果がまだそろっていません。課題のコマンドや保存先を確認してください。', 'Some evidence is still missing. Check the task, command arguments, and output file paths.'],
+    notYet: ['もうひとつ確かめましょう', 'One more thing to check'], needCommands: ['「確認項目」の未達になっている操作や結果を確かめましょう。パイプは一続きで、確認と変更は指定された順番で実行します。', 'Review the pending items in Requirements. Connect pipeline stages in one command and perform observations and changes in the required order.'],
+    requirements: ['確認項目', 'Requirements'], requirementMet: ['確認済み', 'Met'], requirementPending: ['未達', 'Pending'],
+    requirementPipeline: ['パイプでつなぐ', 'Connect in one pipeline'], requirementPipelineNote: ['各段を | でつなぎ、一続きの処理として完了させます。', 'Join the stages with | and complete them as one pipeline.'],
+    requirementAlternatives: ['別の書式も使えます', 'Alternative forms are accepted'], requirementOr: ['または', 'or'],
+    requirementOrder: ['指定された順番で実行', 'Run in the required order'], requirementOrderNote: ['変更をやり直した場合は、その後にもう一度状態を確認します。', 'If you repeat a change, check the state again afterwards.'],
+    requirementStep: ['手順', 'Step'], requirementResult: ['結果', 'Result'], requirementError: ['指定されたエラーを観察', 'Observe the expected error'],
+    requirementNoArgs: ['引数なし', 'No arguments'], requirementOutputCount: ['出力件数', 'Output count'],
+    requirementFile: ['指定内容をファイルに保存', 'Save the required contents to the file'], requirementLocation: ['現在地', 'Current location'], requirementState: ['課題で指定された状態になっている', 'The environment is in the required state'],
     needAnswer: ['コマンドの条件は満たしています。結果が何を示すか、選択肢を確認してください。', 'The command requirements are met. Revisit what the output actually tells you and choose an answer.'],
     wrongAttempts: ['この環境での誤答回数', 'Incorrect answers in this environment'], choiceFeedback: ['選んだ答えについて', 'About your answer'],
     unreadableProgress: ['保存済みの進捗を読み込めなかったため、自動保存を停止しています。「進捗を保存」から元のデータを書き出せます。有効な進捗を読み込むか、学習データを消すと自動保存を再開します。', 'Saved progress could not be read, so autosave is paused to preserve it. Download the original data from Save progress. Import valid progress or erase learning data to resume autosave.'],
@@ -1118,7 +1298,7 @@
     scenario: ['環境を選ぶ', 'Choose a scenario'], scenarioNote: ['切り替えると、練習室の履歴と仮想ファイルを初期化します。', 'Switching resets the playground’s history and virtual files.'],
     ready: ['準備できています', 'Ready to explore'], savedDetail: ['オフラインで利用できます。進捗はこのブラウザだけに保存されます。配布HTMLは変更しません。', 'Works offline. Progress stays in this browser; the distributed HTML file is not modified.'],
     noCandidates: ['補完候補がありません。', 'No completion candidates.'],
-    about: ['教材について', 'About this room'], aboutText: ['powershellroom v0.1.0 · 日本語 / English\nWindows 11上のPowerShell 7系を題材に、オブジェクト・パイプ・CSVと日常のIT調査を学ぶ教材です。windowsCLIroomの画面と進め方を引き継いでいます。', 'powershellroom v0.1.0 · 日本語 / English\nLearn PowerShell 7 objects, pipelines, CSV reports and everyday Windows troubleshooting. Built on the layout and learning flow of windowsCLIroom.']
+    about: ['教材について', 'About this room'], aboutText: ['powershellroom v0.1.1 · 日本語 / English\nWindows 11上のPowerShell 7系を題材に、オブジェクト・パイプ・CSVと日常のIT調査を学ぶ教材です。windowsCLIroomの画面と進め方を引き継いでいます。', 'powershellroom v0.1.1 · 日本語 / English\nLearn PowerShell 7 objects, pipelines, CSV reports and everyday Windows troubleshooting. Built on the layout and learning flow of windowsCLIroom.']
   };
   let state = Engine.empty(), view = 'home', currentId = '', composing = false, historyCursor = -1, historyDraft = '';
   let saveTimer, toastTimer, feedback = null, courseSearch = '', courseOpen = false, unreadableProgress = null;
@@ -1235,11 +1415,52 @@ PC-032  5</pre></div><div class="sample-note"><strong>${t('clueTitle')}</strong>
     if (!$('file-list')) return;
     $('file-list').innerHTML = Shell.listFiles(cp().session).filter(f => !f.dir).sort((a, b) => a.path.localeCompare(b.path)).map(f => `<div class="file-row"><span class="file-name">${escape(f.path)}</span><button data-read="${escape(f.path)}">${t('read')}</button><button data-path="${escape(f.path)}">${t('insert')}</button></div>`).join('');
   }
+  function requirementCommand(check) {
+    if (check.anyOf) return check.anyOf.map(requirementCommand).join(`<span class="requirement-or">${t('requirementOr')}</span>`);
+    const references = [...(Shell.reference || []), ...(globalThis.PSRNetwork?.reference || [])];
+    const name = references.find(ref => ref.name.toLowerCase() === check.name)?.name ||
+      String(check.name || '').replace(/^\$psversiontable/i,'$PSVersionTable').replace(/\.psversion$/i,'.PSVersion');
+    const values = value => value === undefined ? [] : Array.isArray(value) ? value : [value];
+    const fragments = [...new Set([...values(check.paths), ...values(check.argsEqual === undefined ? check.contains : check.argsEqual)].map(String))];
+    const notes = [];
+    if (check.argsEqual?.length === 0) notes.push(t('requirementNoArgs'));
+    if (check.expectCode) notes.push(t('requirementError'));
+    if (check.outputCount !== undefined) notes.push(`${t('requirementOutputCount')}: ${check.outputCount}`);
+    if (check.outputIncludes?.length) notes.push(`${t('requirementResult')}: ${values(check.outputIncludes).join(' / ')}`);
+    if (check.objectIncludes) notes.push(`${t('requirementResult')}: ${values(check.objectIncludes).flatMap(object=>Object.entries(object).map(([key,value])=>`${key} = ${value}`)).join(' / ')}`);
+    return `<span class="requirement-command"><code>${escape(name)}</code>${fragments.length ? `<span class="requirement-fragments">${fragments.map(fragment=>`<code>${escape(loc(fragment))}</code>`).join(' ')}</span>` : ''}${notes.length ? `<span class="requirement-note">${escape(loc(notes.join(' · ')))}</span>` : ''}</span>`;
+  }
+  function renderRequirements(l, result) {
+    const checks = l.verify || {}, rows = [];
+    const marker = met => `<span class="requirement-state ${met ? 'met' : 'pending'}"><span aria-hidden="true">${met ? '✓' : '○'}</span> ${t(met ? 'requirementMet' : 'requirementPending')}</span>`;
+    const row = (kind, index, met, body) => `<li class="requirement" data-kind="${kind}" data-index="${index}" data-met="${met ? 'true' : 'false'}"><div class="requirement-main">${marker(met)}<div class="requirement-description">${body}</div></div></li>`;
+    (checks.commands || []).forEach((check,index)=>rows.push(row('command',index,result.commands[index],requirementCommand(check))));
+    (checks.pipelines || []).forEach((check,index)=>{
+      const alternatives = Array.isArray(check) ? [check] : check.anyOf;
+      const progress = result.pipelineStages?.[index];
+      const selected = Math.min(alternatives.length-1,Math.max(0,progress?.alternative || 0));
+      const pipeline = alternatives[selected];
+      const stages = pipeline.map((stage,i)=>{
+        const met = result.pipelines[index] || progress?.stages[i] === true;
+        return `<li class="pipeline-step" data-stage="${i}" data-met="${met ? 'true' : 'false'}">${marker(met)}${requirementCommand(stage)}</li>`;
+      }).join('');
+      const otherForms = alternatives.length > 1 ? `<details class="requirement-alternatives"><summary>${t('requirementAlternatives')}</summary><ul>${alternatives.map(alternative=>`<li>${alternative.map(requirementCommand).join('<span class="requirement-pipe">|</span>')}</li>`).join('')}</ul></details>` : '';
+      rows.push(row('pipeline',index,result.pipelines[index],`<span>${t('requirementPipeline')}</span><p class="requirement-note">${t('requirementPipelineNote')}</p><ol class="pipeline-steps">${stages}</ol>${otherForms}`));
+    });
+    if (checks.orderedCommands?.length) {
+      const steps = checks.orderedCommands.map((check,index)=>row('ordered',index,index < (result.orderedCount || 0),`<span class="requirement-step">${t('requirementStep')} ${index+1}</span>${requirementCommand(check)}`)).join('');
+      rows.push(`<li class="requirement-order"><p>${t('requirementOrder')}</p>${checks.orderedCommands.some(check=>check.restartOnRepeat) ? `<p class="requirement-note">${t('requirementOrderNote')}</p>` : ''}<ol>${steps}</ol></li>`);
+    }
+    (checks.files || []).forEach((file,index)=>rows.push(row('file',index,result.files[index],`${t('requirementFile')}<code class="requirement-path">${escape(loc(file.path))}</code>`)));
+    if (checks.cwd) rows.push(row('location',0,result.cwd,`${t('requirementLocation')}<code class="requirement-path">${escape(loc(checks.cwd))}</code>`));
+    if (Object.keys(checks.state || {}).length) rows.push(row('state',0,result.stateOk,t('requirementState')));
+    return `<section class="requirement-panel" aria-label="${t('requirements')}"><h3>${t('requirements')}</h3><ul class="requirements">${rows.join('')}</ul></section>`;
+  }
   function renderStatus() {
     if (!$('evidence')) return;
     const l = lesson(), result = l ? Engine.grade(l, cp().session, cp().answer, cp().evidence) : null;
     const done = l && !!state.completed[l.id];
-    $('evidence').innerHTML = `<div><strong class="${result?.commandOk ? 'ready' : ''}">${!l ? t('ready') : result.ok ? `✓ ${t('completedTitle')}` : done ? t('recordTitle') : result.commandOk ? `✓ ${t('evidenceReady')}` : t('evidencePending')}</strong><span class="subtle">${!l ? t('saved') : result.ok ? t('completedText') : done ? t('recordText') : result.commandOk && l.question ? t('evidenceQuestion') : t('evidenceHint')}</span></div>`;
+    $('evidence').innerHTML = `<div><strong class="${result?.commandOk ? 'ready' : ''}">${!l ? t('ready') : result.ok ? `✓ ${t('completedTitle')}` : done ? t('recordTitle') : result.commandOk ? `✓ ${t('evidenceReady')}` : t('evidencePending')}</strong><span class="subtle">${!l ? t('saved') : result.ok ? t('completedText') : done ? t('recordText') : result.commandOk && l.question ? t('evidenceQuestion') : t('evidenceHint')}</span></div>${l ? renderRequirements(l,result) : ''}`;
     if (!l) return;
     const f = $('feedback');
     if (done && result.ok) f.innerHTML = `<div class="feedback success"><strong>✓ ${t('completedTitle')}</strong><p>${escape(loc(l.success))}</p>${l.question ? `<p style="margin-top:8px">${escape(loc(l.question.explanation))}</p>` : ''}</div>`;

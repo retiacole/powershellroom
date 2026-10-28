@@ -85,7 +85,7 @@ test('memory grading accepts byte suffixes and either supported filter syntax',(
  for(const condition of [
   'WorkingSet64 -gt 200MB','-Property WorkingSet64 -gt 204800KB',
   '{ $_.WorkingSet64 -gt 200MB }','{ $_.WorkingSet64 -gt 209715200 }',
-  '{ [double] $_.WorkingSet64 -gt 0.1953125GB }'
+  '{ [double] $_.WorkingSet64 -gt 0.1953125GB }','WS -gt 200MB','{ $_.WS -gt 200MB }'
  ])assertSolved('filter-memory',[`Get-Process | Where-Object ${condition} | Select-Object ProcessName,WorkingSet64`]);
 });
 
@@ -137,6 +137,35 @@ test('stop-process accepts a verified process pipeline and still requires post-c
  assertSolved('stop-one-process',['Get-Process -Name NotesApp | Stop-Process','Get-Process']);
  assert.equal(exercise('stop-one-process',['Get-Process -Name NotesApp | Stop-Process -WhatIf','Get-Process']).grade().ok,false);
  assert.equal(exercise('stop-one-process',['Get-Process -Name NotesApp','Get-Process -Name explorer | Stop-Process','Get-Process']).grade().ok,false);
+});
+
+test('stopping by Name resolves the verified PID and survives saved progress',()=>{
+ for(const stop of ['Stop-Process -Name NotesApp','Stop-Process -Name notesapp','Stop-Process -Name Notes*',
+  'Get-Process NotesApp | Select-Object Name | Stop-Process']){
+  const lines=['Get-Process -Name NotesApp',stop,'Get-Process'];
+  const {cp}=assertSolved('stop-one-process',lines);
+  assert.deepEqual(cp.session.history.flatMap(h=>h.trace).find(t=>t.name==='stop-process').targetObjects,[{Id:4320,ProcessName:'NotesApp'}]);
+ }
+ for(const lines of [
+  ['Stop-Process -Name NotesApp','Get-Process'],
+  ['Get-Process -Name NotesApp','Stop-Process -Name NotesApp'],
+  ['Get-Process -Name NotesApp','Stop-Process -Name NotesApp -WhatIf','Get-Process'],
+  ['Get-Process -Name NotesApp','Stop-Process -Name explorer','Get-Process'],
+  ['Get-Process -Name NotesApp','Stop-Process -Name Missing','Get-Process'],
+  ['Get-Process -Name NotesApp','Stop-Process -Name *','Get-Process']
+ ])assert.equal(exercise('stop-one-process',lines).grade().ok,false,lines.join('; '));
+});
+
+test('resolved process targets require every PID and take precedence over raw arguments',()=>{
+ const lesson={verify:{commands:[{name:'stop-process',contains:['4320'],argsExcludes:['-WhatIf']}]}},
+  trace={name:'stop-process',args:['-Name','NotesApp'],code:0,output:'',targetObjects:[{Id:4320,ProcessName:'NotesApp'}]};
+ const observed=overrides=>Engine.observe(lesson,{code:0,trace:[{...trace,...overrides}]}).commands[0];
+ assert.equal(observed({}),true);
+ for(const targetObjects of [[],[{Id:'4320'}],[{Name:'NotesApp'}],[{Id:2080}],[{Id:4320},{Id:2080}]])
+  assert.equal(observed({targetObjects}),false);
+ assert.equal(observed({args:['-Id','4320'],targetObjects:[{Id:2080}]}),false);
+ assert.equal(observed({args:['-Name','NotesApp','-WhatIf']}),false);
+ assert.equal(observed({code:1}),false);
 });
 
 test('start-service and printing capstone accept pipeline targets and reject WhatIf-only changes',()=>{
@@ -213,4 +242,78 @@ test('tail lesson accepts Select-Object Last as a complete alternative pipeline'
   ['Get-Content C:\\Lab\\Logs\\app.log -Raw | Select-Object -Last 2'],
   ['Get-Content C:\\Lab\\Logs\\app.log',"Write-Output 'Job failed' 'Retry scheduled' | Select-Object -Last 2"]
  ])assert.equal(exercise('tail-log',lines).grade().ok,false,lines.join('; '));
+});
+
+test('help and version lessons accept equivalent complete observations',()=>{
+ assertSolved('discover-help',['Get-Command Get-Content','Get-Help Get-Content -Full']);
+ assertSolved('version-and-alias',['$PSVersionTable.PSVersion','Get-Alias gci']);
+ assert.equal(exercise('discover-help',['Get-Command Get-Content','Get-Help Get-Content']).grade().ok,false);
+ assert.equal(exercise('version-and-alias',['$PSVersionTable.PSEdition','Get-Alias gci']).grade().ok,false);
+});
+
+test('measuring a files-only folder does not require a redundant File switch',()=>{
+ assertSolved('measure-objects',['Get-ChildItem C:\\Lab\\Logs | Measure-Object Length -Sum']);
+ for(const line of ['Get-ChildItem C:\\Lab | Measure-Object Length -Sum','Get-ChildItem C:\\Lab\\Logs | Measure-Object Length -Average','Get-ChildItem C:\\Lab\\Logs -Directory | Measure-Object Length -Sum','Get-ChildItem C:\\Lab\\Logs -File -Filter missing* | Measure-Object Length -Sum','Get-ChildItem C:\\Lab\\Logs -File -Filter app.log | Measure-Object Length -Sum'])
+  assert.equal(exercise('measure-objects',[line]).grade().ok,false,line);
+});
+
+test('latest event observations accept First and Format-List without accepting wrong counts',()=>{
+ for(const line of [
+  'Get-WinEvent System -MaxEvents 3 | Format-List TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object -First 3 TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object -First 3 | Select-Object TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object -First 3 | Format-List TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object TimeCreated,Id,Message | Select-Object -First 3'
+ ])assertSolved('read-system-events',[line]);
+ for(const line of [
+  'Get-WinEvent System | Select-Object TimeCreated,Id,Message',
+  'Get-WinEvent System -MaxEvents 2 | Select-Object TimeCreated,Id,Message',
+  'Get-WinEvent System -MaxEvents 4 | Format-List TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object -Last 3 | Format-List TimeCreated,Id,Message',
+  'Get-WinEvent System | Select-Object -First 3 | Format-List Id,Message'
+ ])assert.equal(exercise('read-system-events',[line]).grade().ok,false,line);
+ const printing=Data.lessons.find(l=>l.id==='capstone-printing');
+ assertSolved('capstone-printing',['Get-WinEvent System | Select-Object -First 3',...printing.solution.slice(1)]);
+});
+
+test('unambiguous parameter prefixes retain canonical grading evidence',()=>{
+ assertSolved('discover-help',['Get-Command -Na Get-Content','Get-Help Get-Content -Fu']);
+ assertSolved('measure-objects',['Get-ChildItem -Pa C:\\Lab\\Logs | Measure-Object -Prop Length -Su']);
+ assertSolved('sort-and-first',['Get-Process | Sort-Object -Pro CPU -Des | Select-Object -Fir 1']);
+ assertSolved('read-system-events',['Get-WinEvent -Log System -Max 3 | Select-Object -Prop TimeCreated,Id,Message']);
+});
+
+test('checklist pipeline progress comes from one contiguous execution',()=>{
+ const lesson=Data.lessons.find(l=>l.id==='measure-objects'),s=Shell.createSession();
+ Shell.run(s,'Get-ChildItem C:\\Lab\\Logs');Shell.run(s,'Measure-Object Length -Sum');
+ let result=Engine.grade(lesson,s);
+ assert.equal(result.ok,false);
+ assert.deepEqual(result.pipelineStages[0].stages,[true,false]);
+ Shell.run(s,'Get-ChildItem C:\\Lab\\Logs | Measure-Object Length -Bogus');
+ result=Engine.grade(lesson,s);
+ assert.equal(result.ok,false);assert.deepEqual(result.pipelineStages[0].stages,[true,false]);
+ Shell.run(s,'Get-ChildItem C:\\Lab\\Logs | Measure-Object Length -Sum');
+ result=Engine.grade(lesson,s);assert.equal(result.ok,true);assert.deepEqual(result.pipelineStages[0].stages,[true,true]);
+});
+
+test('checklist ordered progress is reset after a repeated change',()=>{
+ const {lesson,cp}=assertSolved('start-service',['Get-Service Spooler','Start-Service Spooler','Get-Service Spooler']);
+ assert.equal(Engine.grade(lesson,cp.session,cp.answer,cp.evidence).orderedCount,3);
+ Shell.run(cp.session,'Start-Service Spooler');
+ assert.equal(Engine.grade(lesson,cp.session,cp.answer,cp.evidence).orderedCount,2);
+});
+
+test('process projection aliases are equivalent only on original process objects',()=>{
+ assertSolved('select-properties',['Get-Process | Select-Object Name,Id']);
+ assertSolved('filter-memory',['Get-Process | Where-Object WS -gt 200MB | Select-Object Name,WS']);
+ const l={verify:{pipelines:[[{name:'select-object',contains:['ProcessName']}]]}},s=Shell.createSession();
+ Shell.run(s,'Get-Service | Select-Object Name');assert.equal(Engine.grade(l,s).ok,false);
+});
+
+test('a complete pipeline alternative wins over a longer incomplete prefix in the checklist',()=>{
+ const command=name=>({name}),entry=names=>({code:0,trace:names.map(name=>({name,args:[],code:0,output:''}))});
+ const l={verify:{pipelines:[{anyOf:[['a','b'].map(command),['a','b','c','d'].map(command)]}]}},
+  s={history:[entry(['a','b']),entry(['a','b','c'])]};
+ const g=Engine.grade(l,s);assert.equal(g.ok,true);
+ assert.deepEqual(g.pipelineStages[0],{alternative:0,stages:[true,true]});
 });

@@ -11,12 +11,20 @@
   const success = (items = [], type = 'System.Object', extra = {}) => ({ items: clone(items), type, error: '', code: 0, effects: [], ...extra });
   const failure = message => ({ items: [], type: 'System.Object', error: message, code: 1, effects: [] });
   function unsupported(message) { throw new Error('[Simulator] ' + message); }
-  function options(args, values = [], switches = [], positional) {
-    const result = Object.create(null), valueSet = new Set(values), switchSet = new Set(switches);
+  function options(args, values = [], switches = [], positional, aliases = {}) {
+    const result = Object.create(null), switchSet = new Set(switches);
+    const parameters = [...values, ...switches, ...Object.keys(aliases)];
     for (let i = 0; i < args.length; i++) {
-      const token = args[i], name = token.toLowerCase().replace(/^-/, '');
+      const token = args[i];
       if (token.startsWith('-')) {
-        if (!valueSet.has(name) && !switchSet.has(name)) unsupported('Unsupported parameter: ' + token + '. See Get-Help for the supported form.');
+        const entered = token.slice(1).toLowerCase();
+        const matches = parameters.includes(entered) ? [entered] : parameters.filter(name => name.startsWith(entered));
+        if (matches.length > 1) unsupported('Parameter ' + token + ' is ambiguous. Use one of: ' + matches.map(name => '-' + name).join(', ') + '.');
+        if (!entered || !matches.length) unsupported('Unsupported parameter: ' + token + '. See Get-Help for the supported form.');
+        const name = aliases[matches[0]] || matches[0];
+        // Share the canonical name with the shell trace so equivalent inputs
+        // collect the same grading evidence, while retaining the typed command.
+        args[i] = '-' + name;
         if (own(result, name)) unsupported('Parameter specified more than once: ' + token);
         if (switchSet.has(name)) result[name] = true;
         else {
@@ -25,7 +33,7 @@
           result[name] = value;
         }
       } else {
-        if (!positional || own(result, positional)) unsupported('Unexpected argument: ' + token);
+        if (!positional || own(result, positional)) unsupported("A positional parameter cannot be found that accepts argument '" + token + "'. Put paths or text containing spaces in quotes.");
         result[positional] = token;
       }
     }
@@ -39,17 +47,62 @@
     const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
     return new RegExp('^' + escaped + '$', 'i').test(value);
   }
+  // A compact fictional snapshot with repeated names for grouping and PID
+  // selection. Keep the original three processes first for saved-state checks.
+  const backgroundProcesses = [
+    [1120, 'svchost', 4, 24, 320, 0], [1364, 'svchost', 6, 40, 480, 0],
+    [1548, 'svchost', 1, 32, 260, 0], [1704, 'svchost', 0.5, 16, 180, 0],
+    [1896, 'svchost', 3.5, 56, 510, 0],
+    [7220, 'msedge', 7.5, 160, 920, 1], [7364, 'msedge', 2.25, 96, 340, 1],
+    [7508, 'msedge', 0.75, 64, 220, 1], [7652, 'msedge', 4.25, 32, 280, 1],
+    [8040, 'Teams', 9, 180, 740, 1], [8220, 'OneDrive', 1.25, 72, 310, 1]
+  ];
+  const processDetails = {
+    4320: { HandleCount: 240, SessionId: 1, Path: 'C:\\Program Files\\NotesApp\\NotesApp.exe', StartTime: '2026-10-28T08:45:00+09:00', Responding: true },
+    2080: { HandleCount: 850, SessionId: 1, Path: 'C:\\Windows\\explorer.exe', StartTime: '2026-10-28T08:31:00+09:00', Responding: true },
+    6040: { HandleCount: 160, SessionId: 1, Path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', StartTime: '2026-10-28T09:00:00+09:00', Responding: true },
+    ...Object.fromEntries(backgroundProcesses.map(([Id, ProcessName, , , HandleCount, SessionId], index) => [Id, {
+      HandleCount, SessionId, Responding: true,
+      Path: { svchost: 'C:\\Windows\\System32\\svchost.exe', msedge: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        Teams: 'C:\\Program Files\\Teams\\Teams.exe', OneDrive: 'C:\\Users\\Learner\\AppData\\Local\\Microsoft\\OneDrive\\OneDrive.exe' }[ProcessName],
+      StartTime: '2026-10-28T08:' + String(32 + index).padStart(2, '0') + ':00+09:00'
+    }]))
+  };
+  function enrichProcess(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return item;
+    // Fill older snapshots without replacing values captured at query time.
+    // This only enriches a returned object; it never changes live PC state.
+    const enriched = { ...processDetails[item.Id], ...item };
+    if (own(enriched, 'ProcessName')) enriched.Name = enriched.ProcessName;
+    if (own(enriched, 'HandleCount')) enriched.Handles = enriched.HandleCount;
+    if (own(enriched, 'SessionId')) enriched.SI = enriched.SessionId;
+    if (own(enriched, 'WorkingSet64')) enriched.WS = enriched.WorkingSet64;
+    return enriched;
+  }
   function createState(scenario = 'base') {
     return {
       processes: [
         { Id: 4320, ProcessName: 'NotesApp', CPU: 125, WorkingSet64: 314572800 },
         { Id: 2080, ProcessName: 'explorer', CPU: 8, WorkingSet64: 157286400 },
-        { Id: 6040, ProcessName: 'pwsh', CPU: 2, WorkingSet64: 83886080 }
+        { Id: 6040, ProcessName: 'pwsh', CPU: 2, WorkingSet64: 83886080 },
+        ...backgroundProcesses.map(([Id, ProcessName, CPU, memoryMB]) => ({ Id, ProcessName, CPU, WorkingSet64: memoryMB * 1048576 }))
       ],
       services: [
         { Status: scenario === 'service-stopped' ? 'Stopped' : 'Running', Name: 'Spooler', DisplayName: 'Print Spooler', StartType: 'Automatic' },
         { Status: 'Running', Name: 'Dnscache', DisplayName: 'DNS Client', StartType: 'Automatic' },
-        { Status: 'Stopped', Name: 'RemoteRegistry', DisplayName: 'Remote Registry', StartType: 'Disabled' }
+        { Status: 'Stopped', Name: 'RemoteRegistry', DisplayName: 'Remote Registry', StartType: 'Disabled' },
+        { Status: 'Running', Name: 'Audiosrv', DisplayName: 'Windows Audio', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'EventLog', DisplayName: 'Windows Event Log', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'LanmanWorkstation', DisplayName: 'Workstation', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'Winmgmt', DisplayName: 'Windows Management Instrumentation', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'W32Time', DisplayName: 'Windows Time', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'wuauserv', DisplayName: 'Windows Update', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'BITS', DisplayName: 'Background Intelligent Transfer Service', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'WinRM', DisplayName: 'Windows Remote Management (WS-Management)', StartType: 'Manual' },
+        { Status: 'Running', Name: 'Themes', DisplayName: 'Themes', StartType: 'Automatic' },
+        { Status: 'Running', Name: 'WSearch', DisplayName: 'Windows Search', StartType: 'Automatic' },
+        { Status: 'Stopped', Name: 'TermService', DisplayName: 'Remote Desktop Services', StartType: 'Manual' },
+        { Status: 'Stopped', Name: 'TrustedInstaller', DisplayName: 'Windows Modules Installer', StartType: 'Manual' }
       ]
     };
   }
@@ -66,16 +119,16 @@
   const ref = (name, syntax, summaryJa, summaryEn) => ({ name, syntax, summaryJa, summaryEn });
   const reference = [
     ref('Get-Process', 'Get-Process [[-Name] pattern]\nGet-Process -Id id', '実行中プロセスの名前・PID・累積 CPU 時間・メモリを取得。', 'Get process names, IDs, cumulative CPU time, and memory.'),
-    ref('Stop-Process', 'Stop-Process [-Id] 4320 [-WhatIf]\nGet-Process -Id 4320 | Stop-Process [-WhatIf]', '演習用 NotesApp の停止。-WhatIf は操作の予告だけです。', 'Stop the practice NotesApp. -WhatIf previews without stopping it.'),
+    ref('Stop-Process', 'Stop-Process [-Id] 4320 [-WhatIf]\nStop-Process -Name NotesApp [-WhatIf]\nGet-Process -Id 4320 | Stop-Process [-WhatIf]', '演習用 NotesApp を ID・名前・パイプで指定して停止。-WhatIf は操作の予告だけです。', 'Stop the practice NotesApp by ID, name, or pipeline. -WhatIf previews without stopping it.'),
     ref('Get-Service', 'Get-Service [[-Name] pattern]', 'サービスの現在状態と起動設定を取得。', 'Read service state and startup settings.'),
     ...['Start-Service', 'Stop-Service', 'Restart-Service'].map(name => ref(name, name + ' [-Name] Spooler [-WhatIf]', '演習用 Spooler の状態変更。実機では権限と影響の確認が必要です。', 'Change the practice Spooler state. Real use requires permission and impact checks.')),
     ref('Get-CimInstance', 'Get-CimInstance [-ClassName] Win32_OperatingSystem|Win32_LogicalDisk|Win32_ComputerSystem', 'OS・ディスク容量・PC とドメインの情報を取得。', 'Read operating system, disk capacity, and computer/domain information.'),
-    ref('Get-WinEvent', 'Get-WinEvent -LogName System [-MaxEvents count]', 'System ログを新しい順に取得。ログの時刻と現在状態を区別します。', 'Read System events newest first. Distinguish past events from current state.'),
+    ref('Get-WinEvent', 'Get-WinEvent [-LogName] System [-MaxEvents count]', 'System ログを新しい順に取得。件数省略時は教材の全 12 件を返します。実機では大量になるため -MaxEvents で件数を絞ります。', 'Read System events newest first. Omitting the limit returns all 12 practice events; use -MaxEvents to limit large real-world logs.'),
     ref('Get-NetIPConfiguration', 'Get-NetIPConfiguration', 'IP アドレス・ゲートウェイ・DNS を取得。Windows の NetTCPIP を想定。', 'Read IP, gateway, and DNS configuration using the Windows NetTCPIP module.'),
     ref('Get-NetAdapter', 'Get-NetAdapter', '仮想 Ethernet アダプターの接続状態を取得。', 'Read the simulated Ethernet adapter state.'),
     ref('Get-DnsClientServerAddress', 'Get-DnsClientServerAddress', 'アダプターの DNS サーバー設定を取得。', 'Read adapter DNS server settings.'),
     ref('Resolve-DnsName', 'Resolve-DnsName [-Name] host [-Server 10.20.0.10]', '登録済みホストの IPv4 アドレスを照会。', 'Query the IPv4 address of a registered host.'),
-    ref('Test-Connection', 'Test-Connection [-TargetName] host [-Count 1..10] [-Quiet]', 'ICMP による疎通。-Quiet は真偽値を返します。PowerShell 7 の書式です。', 'Check ICMP reachability. -Quiet returns a Boolean. Uses PowerShell 7 syntax.'),
+    ref('Test-Connection', 'Test-Connection [-TargetName] host [-Count 1..10] [-Quiet]\nTest-Connection -ComputerName host [-Count 1..10] [-Quiet]', 'ICMP による疎通。-Quiet は真偽値を返します。-ComputerName は -TargetName の別名です。', 'Check ICMP reachability. -Quiet returns a Boolean. -ComputerName is an alias for -TargetName.'),
     ref('Test-NetConnection', 'Test-NetConnection [-ComputerName] host [-Port 1..65535]', '指定 TCP ポートまたは ICMP の疎通を確認。アプリの正常動作は別の確認です。', 'Check a TCP port or ICMP reachability. Application health is a separate check.'),
     ref('Get-NetTCPConnection', 'Get-NetTCPConnection [-State Listen|Established]', '接続状態・ポート・所有プロセスを取得。', 'Read TCP state, ports, and owning process IDs.'),
     ref('Get-NetRoute', 'Get-NetRoute [-DestinationPrefix prefix]', '仮想 PC の経路を表示。', 'Read routes on the virtual PC.'),
@@ -95,24 +148,35 @@
         const id = p.id === undefined ? null : integer(p.id, 1, 2147483647, '-Id');
         const found = pc.processes.filter(item => id !== null ? item.Id === id : p.name ? wildcard(item.ProcessName, p.name) : true);
         if (!found.length && (p.id || (p.name && !/[?*]/.test(p.name)))) return failure('Cannot find a process matching ' + (p.id || p.name) + '.');
-        const details = {
-          4320: { Path: 'C:\\Program Files\\NotesApp\\NotesApp.exe', StartTime: '2026-10-28T08:45:00+09:00', Responding: true },
-          2080: { Path: 'C:\\Windows\\explorer.exe', StartTime: '2026-10-28T08:31:00+09:00', Responding: true },
-          6040: { Path: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe', StartTime: '2026-10-28T09:00:00+09:00', Responding: true }
-        };
         // Derived properties keep existing saved PC-state snapshots compatible.
-        return success(found.map(item => ({ ...item, ...details[item.Id] })), 'System.Diagnostics.Process');
+        return success(found.map(enrichProcess), 'System.Diagnostics.Process');
       }
       if (name === 'stop-process') {
-        const p = options(args, ['id'], ['whatif'], 'id');
-        const ids = p.id === undefined ? incoming.map(item => item?.Id) : [integer(p.id, 1, 2147483647, '-Id')];
-        if (!ids.length || ids.some(id => !Number.isInteger(id))) unsupported('Specify -Id 4320 or pipe a process object.');
+        const p = options(args, ['id', 'name'], ['whatif'], 'id');
+        if (p.id !== undefined && p.name !== undefined) unsupported('Use either -Name or -Id.');
+        const resolveNames = names => names.flatMap(pattern => {
+          const found = pc.processes.filter(item => wildcard(item.ProcessName, pattern));
+          if (!found.length && !/[?*]/.test(pattern)) throw new Error('Cannot find a process with the name "' + pattern + '". Verify the process name and call the cmdlet again.');
+          return found.map(item => item.Id);
+        });
+        let ids;
+        if (p.id !== undefined) ids = [integer(p.id, 1, 2147483647, '-Id')];
+        else if (p.name !== undefined) ids = resolveNames([p.name]);
+        else if (incoming.length && incoming.every(item => item && !own(item, 'Id') && typeof item.Name === 'string' && item.Name)) ids = resolveNames(incoming.map(item => item.Name));
+        else {
+          ids = incoming.map(item => item?.Id);
+          if (!ids.length || ids.some(id => !Number.isInteger(id))) unsupported('Specify -Id 4320, -Name NotesApp, or pipe a process object.');
+        }
         if (ids.some(id => id !== 4320)) unsupported('Only the practice NotesApp (PID 4320) can be stopped.');
-        const target = pc.processes.find(item => item.Id === 4320);
-        if (!target) return failure('Cannot find a process with the process identifier 4320.');
-        if (p.whatif) return success([], 'System.Object', { output: 'What if: Performing the operation "Stop-Process" on target "NotesApp (4320)".' });
-        pc.processes = pc.processes.filter(item => item.Id !== 4320);
-        return success([], 'System.Object', { effects: ['process:4320:stopped'] });
+        const targetObjects = [...new Set(ids)].map(id => {
+          const target = pc.processes.find(item => item.Id === id);
+          if (!target) throw new Error('Cannot find a process with the process identifier ' + id + '.');
+          return { Id: target.Id, ProcessName: target.ProcessName };
+        });
+        if (p.whatif) return success([], 'System.Object', { targetObjects,
+          output: targetObjects.map(target => 'What if: Performing the operation "Stop-Process" on target "' + target.ProcessName + ' (' + target.Id + ')".').join('\n') });
+        pc.processes = pc.processes.filter(item => !ids.includes(item.Id));
+        return success([], 'System.Object', { targetObjects, effects: targetObjects.map(target => 'process:' + target.Id + ':stopped') });
       }
       if (name === 'get-service') {
         const p = options(args, ['name'], [], 'name');
@@ -142,13 +206,20 @@
         }
       }
       if (name === 'get-winevent') {
-        const p = options(args, ['logname', 'maxevents']);
+        const p = options(args, ['logname', 'maxevents'], [], 'logname');
         if (String(p.logname).toLowerCase() !== 'system') unsupported('Use -LogName System. Other logs are not simulated.');
-        const limit = p.maxevents === undefined ? 3 : integer(p.maxevents, 1, 100, '-MaxEvents');
+        const limit = p.maxevents === undefined ? Infinity : integer(p.maxevents, 1, 100, '-MaxEvents');
         const events = [
           { TimeCreated: scenario === 'service-stopped' ? '2026-10-28T09:08:00+09:00' : '2026-10-28T09:10:00+09:00', Id: 7036, LevelDisplayName: 'Information', ProviderName: 'Service Control Manager', Message: 'The Print Spooler service entered the ' + (scenario === 'service-stopped' ? 'stopped' : 'running') + ' state.' },
           { TimeCreated: '2026-10-28T09:08:00+09:00', Id: 7031, LevelDisplayName: 'Error', ProviderName: 'Service Control Manager', Message: 'The Print Spooler service terminated unexpectedly. It has done this 1 time(s). [Fictional excerpt; recovery action details omitted.]' },
-          { TimeCreated: '2026-10-28T09:00:00+09:00', Id: 6005, LevelDisplayName: 'Information', ProviderName: 'EventLog', Message: 'The Event log service was started.' }
+          { TimeCreated: '2026-10-28T09:00:00+09:00', Id: 6005, LevelDisplayName: 'Information', ProviderName: 'EventLog', Message: 'The Event log service was started.' },
+          ...[
+            ['08:58', 'Windows Search', 'running'], ['08:54', 'Background Intelligent Transfer Service', 'stopped'],
+            ['08:52', 'Windows Update', 'stopped'], ['08:48', 'Windows Audio', 'running'],
+            ['08:43', 'Themes', 'running'], ['08:39', 'Windows Management Instrumentation', 'running'],
+            ['08:36', 'DNS Client', 'running'], ['08:34', 'Workstation', 'running'], ['08:31', 'Windows Event Log', 'running']
+          ].map(([time, service, state]) => ({ TimeCreated: '2026-10-28T' + time + ':00+09:00', Id: 7036,
+            LevelDisplayName: 'Information', ProviderName: 'Service Control Manager', Message: 'The ' + service + ' service entered the ' + state + ' state. [Fictional excerpt.]' }))
         ];
         return success(events.slice(0, limit), 'System.Diagnostics.Eventing.Reader.EventLogRecord');
       }
@@ -172,7 +243,7 @@
         return success([{ Name: target.name, Type: 'A', TTL: 300, Section: 'Answer', IPAddress: target.address }], 'Microsoft.DnsClient.Commands.DnsRecord_A');
       }
       if (name === 'test-connection') {
-        const p = options(args, ['targetname', 'count'], ['quiet'], 'targetname');
+        const p = options(args, ['targetname', 'count'], ['quiet'], 'targetname', { computername: 'targetname' });
         if (!p.targetname) unsupported('A target name is required.');
         const count = p.count === undefined ? 4 : integer(p.count, 1, 10, '-Count');
         const target = addressFor(p.targetname, scenario);
@@ -236,5 +307,5 @@
       return null;
     } catch (error) { return failure(error.message || '[Simulator] The command could not be completed.'); }
   }
-  return { createState, execute, reference, scenarios };
+  return { createState, enrichProcess, execute, reference, scenarios };
 });

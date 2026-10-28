@@ -2,13 +2,13 @@
 
 PowerShell のオブジェクトとパイプラインを、日常の IT トラブルシューティングで学ぶ教材です。[windowsCLIroom](https://github.com/retiacole/windowsCLIroom) と並ぶ、room シリーズの日常 IT 操作を練習する教材です。短い説明と実習、3 段階のヒント、解答例、学習マップ、進捗保存を備えています。
 
-**v0.1.0 · 5 コース・50 レッスン · 解釈問題 20 問 · 総合演習 3 件 · 日本語 / English**
+**v0.1.1 · 5 コース・50 レッスン · 解釈問題 20 問 · 総合演習 3 件 · 日本語 / English**
 
 [**すぐにやってみる / Play Now**](https://retiacole.github.io/powershellroom/)
 
 PowerShell のインストールやアカウント登録は不要です。配布用 HTML を保存すれば、演習をオフラインでも進められます。
 
-114 件のテストと、全 50 レッスン・12 通りの別解のブラウザー確認を実施しました。[確認記録](VALIDATION.md)を同梱しています。
+146 件のテストと、全 50 レッスン・25 通りの別解のブラウザー確認を実施しました。[確認記録](VALIDATION.md)を同梱しています。
 
 [レビューガイド](REVIEW_GUIDE.md) · [変更記録](CHANGELOG.md) · [開発手順](CONTRIBUTING.md) · [公開・更新手順](PUBLISHING.md)
 
@@ -24,6 +24,8 @@ PowerShell のインストールやアカウント登録は不要です。配布
 [Web 教材を開く](https://retiacole.github.io/powershellroom/)と、ブラウザーですぐに練習できます。
 
 [powershellroom.html](powershellroom.html) を保存してブラウザーで開きます。GitHub 上では HTML のファイル画面からダウンロードして開いてください。教材の利用に PowerShell のインストール、ログイン、サーバーの起動は不要です。単一 HTML に教材・画面・シミュレーターを含みます。
+
+「確認項目」には、できた操作と未達の操作、必要な実行順、変更後の再確認を表示します。パイプは途中の段階も確認できます。全角の構文文字や引用符の抜けには修正案を示し、CMD 系の未対応コマンドには教材で使える代替を案内します。
 
 各レッスンは独立した仮想環境です。「やってみよう」に沿ってコマンドを入力し、出力を観察します。解釈問題がある場合は選択肢にも回答します。誤答には個別の説明を表示します。
 
@@ -63,17 +65,21 @@ JavaScript で対応範囲を定めた学習用シミュレーターです。実
 
 - パイプラインではプロパティと値を持つデータを渡します。画面上の表を文字列として切り貼りする実装ではありません。
 - 変数への代入と参照、二重引用符でのスカラー・環境変数の補間、限定した `Where-Object` / `ForEach-Object` のスクリプトブロックを扱います。任意の式の評価には対応しません。
-- `Where-Object` は単一の比較条件（必要に応じて `[int]` / `[double]`）、`ForEach-Object` は各オブジェクトの項目抽出に対応します。一般的なループや任意の処理ブロックは再現しません。
+- `Where-Object` は単一の比較条件（必要に応じて `[int]` / `[double]`）、`ForEach-Object` は各オブジェクトの項目抽出に対応します。`-and` / `-not` を含む複合条件、一般的なループや任意の処理ブロックは再現しません。
+- 対応パラメーターの一意な前方一致を受け付けます。複数に一致する省略形は候補を表示します。`Test-Connection -ComputerName`、`Get-WinEvent System`、`Select-String pattern path` にも対応します。
 - `Sort-Object` / `Group-Object` は単一項目のみ、`Select-String` は文字列の検索に対応します。文字コードの指定は UTF-8 に限定しています。
 - `Select-Object -First` / `-Last` で先頭・末尾の項目を選べます。`Get-CimInstance -Filter`、`(Get-Service Spooler).Status` のような括弧付き式は未対応です。
-- サービスの既定表示は Status・Name・DisplayName です。StartType や、プロセスの Path・StartTime・Responding はオブジェクトに保持し、`Select-Object` / `Get-Member` で調べられます。`Get-Member` のメソッド一覧は一部を表示するだけで、メソッド呼び出しは再現しません。
+- サービスの既定表示は Status・Name・DisplayName です。StartType や、プロセスの Path・StartTime・Responding はオブジェクトに保持し、`Select-Object` / `Get-Member` で調べられます。Process の Name は ProcessName、WS は WorkingSet64 の別名です。`Format-List` の既定は Id・Handles・CPU・SI・Name、`Format-List *` は保持する全項目を表示します。`Get-Member` のメソッド一覧は一部を表示するだけで、メソッド呼び出しは再現しません。
+- ファイル一覧は Mode・LastWriteTime・Length・Name を既定表示します。更新日時は架空の固定時刻から始まり、内容変更時に進みます。PowerShell 7.3 以降の通常設定に合わせ、`Measure-Object` は指定プロパティのない項目を集計から除外します。StrictMode は未対応です。
 - `ConvertTo-Json -Depth` は指定値の検査に対応しますが、深さによる項目の省略や警告は再現していません。
 - `Import-Csv` の値は文字列です。数値として比較する演習では `[int]` で変換します。
 - `Format-*` は表示用です。`Export-Csv` につなぐ場合は `Select-Object` を使います。表示用データを CSV に渡す操作は教材では説明付きで拒否します。
 - 仮想 C / D ドライブのテキストファイルが対象です。UNC、実ファイル、任意のバイナリー、ファイル権限の完全再現は含みません。
-- 状態変更は仮想ファイル、演習用 NotesApp、Spooler に限定しています。`-WhatIf` と実行を区別します。実機では権限・対象・影響の確認が必要です。
+- 状態変更は仮想ファイル、演習用 NotesApp、Spooler に限定しています。`Stop-Process` は ID・名前・パイプ入力に対応し、`-WhatIf` と実行を区別します。名前指定は同名の複数プロセスを対象にし得るため、実機では権限・対象・影響の確認が必要です。
 - HTTP は登録済みの架空の応答のみです。PowerShell 7 の `-SkipHttpErrorCheck` を扱い、通常の 503 エラーと区別します。TLS や認証の検証は行いません。
 - 型名・表の表示・エラーメッセージは学習向けの簡略表現です。実機の表示を完全に再現するものではありません。
+
+プロセスは 14 件（svchost と msedge の同名インスタンスを含む）、サービスは 15 件、System イベントは 12 件です。実機ではさらに多く、`Get-WinEvent` で件数を指定しないと大量のログが表示されることがあります。
 
 自由練習では、通常の PC、印刷サービス停止、DNS 設定不良、TCP 接続失敗、HTTP 503、ディスク容量不足を切り替えられます。変更はその練習室内だけに反映されます。
 
@@ -137,12 +143,16 @@ Download the HTML and open it locally to practice offline, with no PowerShell in
 
 **powershellroom** is a Japanese/English learning simulator for PowerShell 7 on Windows 11, with 50 independent lessons across five tracks. Alongside [windowsCLIroom](https://github.com/retiacole/windowsCLIroom), it offers practice in everyday IT tasks within the room series. Open `powershellroom.html` in a browser to use it offline.
 
-Learn command discovery, files, objects, filtering, sorting, variables, CSV/JSON reports, process and service inspection, and DNS/TCP/HTTP troubleshooting. The pipeline trace shows object types, counts, and properties. Questions ask learners to distinguish evidence from assumptions.
+Learn command discovery, files, objects, filtering, sorting, variables, CSV/JSON reports, process and service inspection, and DNS/TCP/HTTP troubleshooting. The pipeline trace shows object types, counts, and properties. A bilingual checklist identifies missing commands, pipeline stages, required order, and post-change checks. Input errors offer targeted fixes for full-width syntax, unquoted spaces, and unsupported CMD commands. Questions ask learners to distinguish evidence from assumptions.
 
 Use **Reset this lesson** to restore its environment while retaining other lessons and past completion records. Progress is stored independently from windowsCLIroom; export/import a JSON backup from **Settings & progress**. Japanese examples show yen path separators and English examples show backslashes. Typed command drafts and previous output survive language changes.
 
 Only the documented command subset is simulated. All files, computers and network responses are fictional; no commands run on your actual OS and no real connections are made. PowerShell 7 differs from Windows PowerShell 5.1, and Windows-specific network modules are not portable to every platform. Manual comparison against a real Windows/PowerShell environment is still pending.
 
 The simulator supports single-condition filters, property projection in `ForEach-Object`, first/last item selection, single-property sorting/grouping, literal text search, and UTF-8 encoding. `Get-CimInstance -Filter` and parenthesized expressions such as `(Get-Service Spooler).Status` are unsupported. `Get-Member` lists a small subset of methods for discovery; invoking methods is unsupported. `ConvertTo-Json -Depth` validates the argument but does not reproduce depth truncation or warnings. See the [review guide](REVIEW_GUIDE.md), [validation record](VALIDATION.md), and [contribution guide](CONTRIBUTING.md) for details.
+
+Process `Name` aliases `ProcessName`, and `WS` aliases `WorkingSet64`. The default process `Format-List` view shows Id, Handles, CPU, SI, and Name; `Format-List *` shows all simulated properties. `Stop-Process` accepts an ID, name, or pipeline input, while changes remain limited to the practice NotesApp. A name can match multiple running instances on a real machine.
+
+The practice PC contains 14 processes, 15 services, and 12 System events, including processes with duplicate names and distinct IDs. File listings include LastWriteTime. Unique parameter prefixes, positional event-log and text-search arguments, and Test-Connection -ComputerName are supported. Following normal PowerShell 7.3+ behavior, Measure-Object skips items lacking the requested property; StrictMode is not simulated.
 
 MIT License. See [LICENSE](LICENSE). The original windowsCLIroom copyright notice is retained.

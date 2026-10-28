@@ -1,6 +1,6 @@
 {
   "name": "powershellroom",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "An offline bilingual PowerShell object pipeline and IT troubleshooting learning room.",
   "license": "MIT",

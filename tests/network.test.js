@@ -25,7 +25,8 @@ test('process output retains numeric properties, matching is exact or explicitly
   const s = fresh();
   const result = ok(s, 'get-process');
   assert.equal(result.type, 'System.Diagnostics.Process');
-  assert.deepEqual(result.items.map(row => row.Id), [4320, 2080, 6040]);
+  assert.deepEqual(result.items.slice(0, 3).map(row => row.Id), [4320, 2080, 6040]);
+  assert.equal(result.items.length, 14);
   assert.equal(result.items[0].CPU, 125);
   assert.equal(typeof result.items[0].WorkingSet64, 'number');
   result.items[0].CPU = 999;
@@ -34,6 +35,88 @@ test('process output retains numeric properties, matching is exact or explicitly
   assert.equal(ok(s, 'get-process', ['-Id', '4320']).items[0].ProcessName, 'NotesApp');
   assert.notEqual(run(s, 'get-process', ['-Id', '432']).code, 0);
   assert.notEqual(run(s, 'get-process', ['-Name', 'NotesApp', '-Id', '4320']).code, 0);
+});
+
+test('process aliases mirror their source properties without changing persisted PC state', () => {
+  const s = fresh(), before = JSON.stringify(s.pc);
+  for (const process of ok(s, 'get-process').items) {
+    assert.equal(process.Name, process.ProcessName);
+    assert.equal(process.Handles, process.HandleCount);
+    assert.equal(process.SI, process.SessionId);
+    assert.equal(process.WS, process.WorkingSet64);
+    assert.equal(typeof process.HandleCount, 'number');
+    assert.equal(typeof process.SessionId, 'number');
+  }
+  assert.equal(JSON.stringify(s.pc), before);
+  assert.equal(Object.hasOwn(s.pc.processes[0], 'Name'), false, 'old saved state keeps the same shape');
+});
+
+test('practice data makes repeated process names and service grouping observable', () => {
+  const s = fresh(), processes = ok(s, 'get-process').items, services = ok(s, 'get-service').items;
+  assert.equal(processes.length, 14);
+  assert.equal(new Set(processes.map(process => process.Id)).size, 14);
+  assert.equal(ok(s, 'get-process', ['svchost']).items.length, 5);
+  assert.equal(ok(s, 'get-process', ['msedge']).items.length, 4);
+  assert.equal(processes.reduce((sum, process) => sum + process.CPU, 0), 175);
+  assert.deepEqual(processes.filter(process => process.CPU > 10 || process.WorkingSet64 > 200 * 1048576).map(process => process.Name), ['NotesApp']);
+  for (const process of processes) {
+    assert.match(process.Path, /^[A-Z]:\\/);
+    assert.match(process.StartTime, /^2026-10-28T/);
+    assert.equal(typeof process.Responding, 'boolean');
+  }
+  assert.equal(services.length, 15);
+  assert.equal(new Set(services.map(service => service.Name)).size, 15);
+  assert.deepEqual(new Set(services.map(service => service.Status)), new Set(['Running', 'Stopped']));
+  assert.deepEqual(new Set(services.map(service => service.StartType)), new Set(['Automatic', 'Manual', 'Disabled']));
+});
+
+test('unique parameter prefixes and ComputerName alias normalize to canonical names', () => {
+  const s = fresh();
+  const cases = [
+    ['get-process', ['-Na', 'NotesApp'], ['-name', 'NotesApp']],
+    ['get-winevent', ['-Log', 'System', '-Max', '2'], ['-logname', 'System', '-maxevents', '2']],
+    ['get-ciminstance', ['-Class', 'Win32_OperatingSystem'], ['-classname', 'Win32_OperatingSystem']],
+    ['test-connection', ['-ComputerName', '10.20.0.1', '-Cou', '1'], ['-targetname', '10.20.0.1', '-count', '1']],
+    ['test-connection', ['-Comp', '10.20.0.1', '-Q'], ['-targetname', '10.20.0.1', '-quiet']],
+    ['test-netconnection', ['-Comp', 'intranet.corp.example', '-P', '443'], ['-computername', 'intranet.corp.example', '-port', '443']],
+    ['invoke-webrequest', ['-U', 'https://intranet.corp.example', '-M', 'Head'], ['-uri', 'https://intranet.corp.example', '-method', 'Head']]
+  ];
+  for (const [command, input, normalized] of cases) {
+    const expected = ok(s, command, [...normalized]);
+    assert.deepEqual(ok(s, command, input), expected, command);
+    assert.deepEqual(input, normalized, 'grading traces receive canonical names');
+  }
+  const before = JSON.stringify(s.pc);
+  const ambiguous = run(s, 'test-connection', ['-Co', '10.20.0.1']);
+  assert.equal(ambiguous.code, 1);
+  assert.match(ambiguous.error, /ambiguous.*-count.*-computername/);
+  assert.equal(JSON.stringify(s.pc), before);
+  assert.notEqual(run(s, 'test-connection', ['-TargetName', '10.20.0.1', '-ComputerName', '10.20.0.1']).code, 0);
+});
+
+test('enrichProcess fills old snapshots without overwriting captured values or reviving a process', () => {
+  const s = fresh();
+  const captured = { Id: 4320, ProcessName: 'NotesApp', CPU: 12, WorkingSet64: 1024,
+    Path: 'C:\\Captured\\NotesApp.exe', StartTime: '2026-10-27T10:00:00+09:00',
+    Responding: false, HandleCount: 42, SessionId: 3 };
+  const before = JSON.stringify(captured);
+  ok(s, 'stop-process', ['-Id', '4320']);
+  const pcAfterStop = JSON.stringify(s.pc);
+  const enriched = Network.enrichProcess(captured);
+  for (const [name, value] of Object.entries(captured)) assert.equal(enriched[name], value, name);
+  assert.equal(enriched.Name, captured.ProcessName);
+  assert.equal(enriched.Handles, captured.HandleCount);
+  assert.equal(enriched.SI, captured.SessionId);
+  assert.equal(enriched.WS, captured.WorkingSet64);
+  assert.equal(JSON.stringify(captured), before);
+  assert.equal(JSON.stringify(s.pc), pcAfterStop);
+  assert.notEqual(run(s, 'get-process', ['-Id', '4320']).code, 0);
+  const old = { Id: 4320, ProcessName: 'NotesApp', CPU: 12, WorkingSet64: 1024 };
+  const upgraded = Network.enrichProcess(old);
+  assert.equal(upgraded.Name, 'NotesApp');
+  assert.equal(upgraded.Handles, 240);
+  assert.equal(upgraded.SI, 1);
+  assert.equal(Object.hasOwn(old, 'Name'), false);
 });
 
 test('Stop-Process WhatIf does not stop a process and supported object pipeline does', () => {
@@ -49,6 +132,63 @@ test('Stop-Process WhatIf does not stop a process and supported object pipeline 
   assert.notEqual(run(s, 'get-process', ['-Id', '4320']).code, 0);
   assert.deepEqual(ok(s, 'get-nettcpconnection', ['-State', 'Listen']).items, [], 'stopped app no longer owns a listener');
   assert.notEqual(run(s, 'stop-process', ['-Id', '4320']).code, 0);
+});
+
+test('Stop-Process resolves names case-insensitively and records the actual target', () => {
+  for (const name of ['NotesApp', 'notesapp', 'Notes*', 'NotesAp?']) {
+    const s = fresh();
+    const stopped = ok(s, 'stop-process', ['-Name', name]);
+    assert.deepEqual(stopped.targetObjects, [{ Id: 4320, ProcessName: 'NotesApp' }]);
+    assert.deepEqual(stopped.effects, ['process:4320:stopped']);
+    assert.deepEqual(stopped.items, []);
+    assert.equal(s.pc.processes.length, 13);
+    assert.equal(s.pc.processes.some(process => process.ProcessName === 'NotesApp'), false);
+    assert.deepEqual(s.pc.processes.slice(0, 2).map(process => process.ProcessName), ['explorer', 'pwsh']);
+  }
+  assert.match(Network.reference.find(ref => ref.name === 'Stop-Process').syntax, /Stop-Process -Name NotesApp/);
+});
+
+test('Stop-Process name preview resolves the target without mutating state', () => {
+  const s = fresh(), before = JSON.stringify(s.pc);
+  const preview = ok(s, 'stop-process', ['-WhatIf', '-Name', 'NotesApp']);
+  assert.match(preview.output, /Performing the operation "Stop-Process" on target "NotesApp \(4320\)"/);
+  assert.deepEqual(preview.targetObjects, [{ Id: 4320, ProcessName: 'NotesApp' }]);
+  assert.deepEqual(preview.effects, []);
+  assert.equal(JSON.stringify(s.pc), before);
+  assert.deepEqual(ok(s, 'stop-process', ['4320']).targetObjects, preview.targetObjects);
+  assert.notEqual(run(s, 'stop-process', ['-Name', 'NotesApp']).code, 0, 'a second stop must not claim a missing process');
+});
+
+test('Stop-Process binds projected Name objects while preserving Id precedence', () => {
+  const s = fresh();
+  const projected = ok(s, 'get-process', ['NotesApp']).items.map(({ Name }) => ({ Name }));
+  const preview = ok(s, 'stop-process', ['-WhatIf'], projected);
+  assert.deepEqual(preview.targetObjects, [{ Id: 4320, ProcessName: 'NotesApp' }]);
+  assert.equal(s.pc.processes.length, 14);
+  assert.deepEqual(ok(s, 'stop-process', [], projected).effects, ['process:4320:stopped']);
+  for (const input of [[{ Id: 2080, Name: 'NotesApp' }], [{ Id: '4320', Name: 'NotesApp' }], [{ Name: 'explorer' }]]) {
+    const other = fresh(), before = JSON.stringify(other.pc);
+    assert.notEqual(run(other, 'stop-process', [], input).code, 0);
+    assert.equal(JSON.stringify(other.pc), before);
+  }
+});
+
+test('Stop-Process rejects invalid or out-of-scope names before any mutation', () => {
+  const s = fresh(), before = JSON.stringify(s.pc);
+  for (const args of [
+    ['-Name', 'MissingApp'], ['-Name', 'Notes'], ['-Name', 'explorer'], ['-Name', '*'],
+    ['-Name', 'NotesApp', '-Id', '4320'], ['-Name', 'NotesApp', '4320'],
+    ['NotesApp'], ['-Name'], ['-Name', 'NotesApp', '-Name', 'NotesApp']
+  ]) {
+    const failed = run(s, 'stop-process', args);
+    assert.notEqual(failed.code, 0, args.join(' '));
+    assert.deepEqual(failed.effects, []);
+    assert.equal(JSON.stringify(s.pc), before);
+  }
+  const noMatches = ok(s, 'stop-process', ['-Name', 'Missing*']);
+  assert.deepEqual(noMatches.targetObjects, []);
+  assert.deepEqual(noMatches.effects, []);
+  assert.equal(JSON.stringify(s.pc), before);
 });
 
 test('service queries distinguish state and startup type; mutation is constrained to Spooler', () => {
@@ -102,6 +242,15 @@ test('event log is newest first and is not rewritten when the current service st
   ok(s, 'start-service', ['Spooler']);
   assert.deepEqual(ok(s, 'get-winevent', ['-LogName', 'System', '-MaxEvents', '2']).items, events);
   assert.notEqual(run(s, 'get-winevent', ['-LogName', 'Application']).code, 0);
+});
+
+test('event positional LogName and MaxEvents select the newest entries from a larger log', () => {
+  const s = fresh(), events = ok(s, 'get-winevent', ['System']).items;
+  assert.equal(events.length, 12);
+  assert.deepEqual(ok(s, 'get-winevent', ['-LogName', 'System']).items, events);
+  assert.deepEqual(ok(s, 'get-winevent', ['-MaxEvents', '3', 'System']).items, events.slice(0, 3));
+  assert.deepEqual(events.slice(0, 3).map(event => event.Id), [7036, 7031, 6005]);
+  for (let index = 1; index < events.length; index++) assert.ok(events[index - 1].TimeCreated >= events[index].TimeCreated);
 });
 
 test('IP, DNS, adapter and route commands represent one consistent network', () => {

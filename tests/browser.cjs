@@ -31,12 +31,16 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-artifacts');
     assert.equal(await page.locator('.choice-feedback').textContent(),c.feedback.ja.replace(/\\/g,'¥'));wrongAnswers++;
    }await page.locator(`input[name="answer"][value="${l.question.answer}"]`).check();await page.locator('[data-action="check"]').click();}
    assert.equal(await page.locator('#feedback .success').count(),1,l.id+' complete');
+   assert.equal(await page.locator('#evidence .requirement[data-met="false"]').count(),0,l.id+' all command requirements met');
    if(i===14)await page.screenshot({path:path.join(output,'lesson-objects.png'),fullPage:true});
   }
   assert.equal(await page.evaluate(()=>Object.keys(JSON.parse(localStorage.getItem(PSREngine.KEY)).completed).length),50);
   console.log(`All 50 displayed Japanese solutions passed; ${wrongAnswers} wrong interpretation choices rejected with individual feedback.`);
   // Reviewed alternative answers must also work through the displayed terminal and saved progress.
   const alternatives=[
+   ['select-properties',()=>['Get-Process | Select-Object Name,Id']],
+   ['filter-memory',()=>['Get-Process | Where-Object WS -gt 200MB | Select-Object Name,WS']],
+   ['read-system-events',()=>['Get-WinEvent System | Select-Object TimeCreated,Id,Message | Select-Object -First 3']],
    ['quoted-path',lines=>lines.map(line=>line.replace('-LiteralPath','-Path'))],
    ['tail-log',()=>['Get-Content C:\\Lab\\Logs\\app.log | Select-Object -Last 2']],
    ['large-files',lines=>lines.map(line=>line.replace('Where-Object Length -gt 200','Where-Object { $_.Length -gt 200 }'))],
@@ -46,9 +50,19 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-artifacts');
    ['capstone-web-503',lines=>lines.map(line=>line.replace('Invoke-WebRequest -Uri','Invoke-WebRequest -Method Head'))],
    ['stop-one-process',lines=>lines.map(line=>line.replace('Stop-Process -Id 4320','Get-Process -Name NotesApp | Stop-Process'))],
    ['stop-one-process',lines=>lines.map(line=>line.replace('Stop-Process -Id 4320','Get-Process -Name NotesApp | Select-Object Id | Stop-Process'))],
+   ['stop-one-process',lines=>lines.map(line=>line.replace('Stop-Process -Id 4320','Stop-Process -Name NotesApp'))],
+   ['stop-one-process',lines=>lines.map(line=>line.replace('Stop-Process -Id 4320','Get-Process -Name NotesApp | Select-Object Name | Stop-Process'))],
    ['start-service',lines=>lines.map(line=>line.replace('Start-Service -Name Spooler','Get-Service Spooler | Start-Service'))],
    ['start-service',lines=>lines.map(line=>line.replace('Start-Service -Name Spooler','Get-Service Spooler | Select-Object Name | Start-Service'))],
-   ['capstone-printing',lines=>lines.map(line=>line.replace('Start-Service -Name Spooler','Get-Service Spooler | Start-Service'))]
+   ['capstone-printing',lines=>lines.map(line=>line.replace('Start-Service -Name Spooler','Get-Service Spooler | Start-Service'))],
+   ['discover-help',lines=>lines.map(line=>line.replace('-Examples','-Full'))],
+   ['discover-help',lines=>lines.map(line=>line.replace('-Examples','-Fu'))],
+   ['version-and-alias',lines=>lines.map(line=>line.replace('$PSVersionTable','$PSVersionTable.PSVersion'))],
+   ['measure-objects',lines=>lines.map(line=>line.replace(' -File',''))],
+   ['read-system-events',()=>['Get-WinEvent -LogName System | Select-Object -First 3 | Select-Object TimeCreated,Id,Message']],
+   ['read-system-events',()=>['Get-WinEvent -LogName System | Select-Object -First 3 | Format-List TimeCreated,Id,Message']],
+   ['read-system-events',()=>['Get-WinEvent -LogName System -MaxEvents 3 | Format-List TimeCreated,Id,Message']],
+   ['capstone-printing',lines=>lines.map(line=>line.replace('Get-WinEvent -LogName System -MaxEvents 3','Get-WinEvent -LogName System | Select-Object -First 3'))]
   ];
   for(const [id,alternate] of alternatives){
    const lesson=Data.lessons.find(l=>l.id===id);
@@ -60,6 +74,35 @@ const root=path.resolve(__dirname,'..'),output=path.join(root,'test-artifacts');
   await page.reload();await page.locator('.hero-actions [data-open]').click();
   await page.locator('[data-action="check"]').click();assert.equal(await page.locator('#feedback .success').count(),1,'pipeline answer survives reload');
   console.log(`All ${alternatives.length} reviewed alternative answer sequences passed; pipeline evidence survived reload.`);
+  // Checklist feedback distinguishes a successful first stage from a complete pipeline.
+  await page.locator('.lesson-item[data-open="measure-objects"]').click();await page.locator('#lesson-reset').click();
+  const measureRequirement=()=>page.locator('#evidence .requirement[data-kind="pipeline"][data-index="0"]');
+  assert.equal(await measureRequirement().getAttribute('data-met'),'false');
+  await run('Get-ChildItem C:\\Lab\\Logs -File');
+  assert.equal(await measureRequirement().locator('.pipeline-step[data-stage="0"]').getAttribute('data-met'),'true');
+  assert.equal(await measureRequirement().locator('.pipeline-step[data-stage="1"]').getAttribute('data-met'),'false');
+  assert.equal(await measureRequirement().getAttribute('data-met'),'false');
+  await run('Measure-Object Length -Sum');
+  assert.equal(await measureRequirement().getAttribute('data-met'),'false','separate commands do not count as a complete pipeline');
+  await page.locator('[data-action="check"]').click();assert.ok((await page.locator('#feedback').textContent()).includes('確認項目'));
+  await page.screenshot({path:path.join(output,'requirements-partial.png'),fullPage:true});
+  await run('Get-ChildItem C:\\Lab\\Logs | Measure-Object Length -Sum');
+  assert.equal(await measureRequirement().getAttribute('data-met'),'true');
+  assert.equal(await measureRequirement().locator('.pipeline-step[data-met="false"]').count(),0);
+  // Ordered observations reflect the latest change rather than an old completion record.
+  await page.locator('.lesson-item[data-open="start-service"]').click();await page.locator('#lesson-reset').click();
+  const ordered=()=>page.locator('#evidence .requirement[data-kind="ordered"]');
+  assert.equal(await ordered().count(),3);assert.equal(await page.locator('#evidence .requirement[data-kind="ordered"][data-met="true"]').count(),0);
+  await run('Get-Service Spooler');assert.equal(await ordered().nth(0).getAttribute('data-met'),'true');
+  assert.equal(await ordered().nth(1).getAttribute('data-met'),'false');
+  await run('Start-Service Spooler');await run('Get-Service Spooler');
+  assert.equal(await ordered().nth(2).getAttribute('data-met'),'true');
+  await run('Start-Service Spooler');assert.equal(await ordered().nth(2).getAttribute('data-met'),'false');
+  await page.locator('#language-button').click();assert.ok((await page.locator('#evidence').textContent()).includes('Requirements'));
+  assert.ok((await page.locator('#evidence').textContent()).includes('check the state again'));
+  await page.locator('#language-button').click();await run('Get-Service Spooler');
+  assert.equal(await ordered().nth(2).getAttribute('data-met'),'true');
+  console.log('Bilingual requirement checklist, partial pipeline progress, independent-command rejection and post-change observation passed.');
   // Inspect actual object values in a pipeline, not just its text rendering.
   await page.locator('#sandbox-button').click();await run('Get-Process | Where-Object CPU -gt 10 | Select-Object ProcessName,CPU');
   await page.locator('.trace-open').last().click();assert.equal(await page.locator('.trace-stage').count(),3);

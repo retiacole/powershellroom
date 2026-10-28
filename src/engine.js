@@ -25,11 +25,16 @@
       return number ? String(Number(number[1]) * ({kb:1024,mb:1048576,gb:1073741824}[number[2]?.toLowerCase()] || 1)) : arg;
     });
   }
-  function canonicalArgs(name, args) {
+  function canonicalArgs(name, args, inputType='') {
     const propertyList = ['select-object','format-table','format-list'].includes(name);
-    if (name === 'where-object') args = filterArgs(args);
+    const process=inputType==='System.Diagnostics.Process', aliases={name:'processname',ws:'workingset64',handles:'handlecount',si:'sessionid'};
+    if (name === 'where-object') {
+      args = filterArgs(args);
+      const propertyIndex=args.findIndex(arg=>/^-(eq|ne|gt|ge|lt|le|like)$/i.test(arg))-1;
+      if(process && propertyIndex>=0)args=args.map((arg,i)=>i===propertyIndex?(aliases[String(arg).toLowerCase()]||arg):arg);
+    }
     return args.flatMap(arg => propertyList
-      ? String(arg).toLowerCase().split(',').map(value => value.trim()).filter(Boolean)
+      ? String(arg).toLowerCase().split(',').map(value => value.trim()).filter(Boolean).map(value=>process?(aliases[value]||value):value)
       : [String(arg).toLowerCase()]);
   }
   function pipelineTarget(name, trace, expected) {
@@ -43,25 +48,37 @@
     return trace.inputObjects.every(object => object && Object.hasOwn(object,binding.property) &&
       binding.valid(object[binding.property]) && String(object[binding.property]).toLowerCase() === expected[0]);
   }
+  function resolvedProcessTarget(name, trace, expected) {
+    // Name patterns and pipeline properties can resolve to the same PID.
+    // New traces record the actual bound targets; old progress can still use
+    // its original argument/pipeline evidence when that optional field is absent.
+    if (name !== 'stop-process' || expected.length !== 1 || !/^\d+$/.test(expected[0]) ||
+      trace.targetObjects === undefined) return null;
+    return Array.isArray(trace.targetObjects) && trace.targetObjects.length > 0 &&
+      trace.targetObjects.every(object => object && Number.isInteger(object.Id) && String(object.Id) === expected[0]);
+  }
   function matches(c, trace, lineCode) {
+    if (c.anyOf) return c.anyOf.some(alternative=>matches(alternative,trace,lineCode));
     const name = c.name.toLowerCase().replace(/\.exe$/, '');
     const expectedCode = c.expectCode === undefined ? 0 : c.expectCode;
     if (trace.name !== name || trace.code !== expectedCode || lineCode !== expectedCode) return false;
-    const args = canonicalArgs(name, trace.args || []);
+    const args = canonicalArgs(name, trace.args || [], trace.inputType);
     if (arr(c.argsExcludes).some(value => args.includes(String(value).toLowerCase()))) return false;
     const contains = arr(c.contains).every(value => {
-      const expected = canonicalArgs(name, [String(value)]);
+      const expected = canonicalArgs(name, [String(value)], trace.inputType);
+      const targetMatch = resolvedProcessTarget(name,trace,expected);
+      if (targetMatch !== null) return targetMatch;
       if (expected.every(v=>args.includes(v))) return true;
       if (pipelineTarget(name,trace,expected)) return true;
       // A phrase can be one quoted argument or a complete sequence of arguments.
       // Neither IPs, host names, flags, nor file names use substring matching.
       if (!/\s/.test(value)) return false;
-      const words = canonicalArgs(name, String(value).split(/\s+/));
+      const words = canonicalArgs(name, String(value).split(/\s+/), trace.inputType);
       return args.some((_,i)=>words.every((v,j)=>args[i+j]===v));
     });
     if (!contains) return false;
     if (c.argsEqual !== undefined) {
-      const expected = canonicalArgs(name, c.argsEqual);
+      const expected = canonicalArgs(name, c.argsEqual, trace.inputType);
       if (expected.length !== args.length || !expected.every((v,i)=>args[i]===v)) return false;
     }
     const paths = trace.resolvedPaths || (trace.args || []).filter(arg=>/^[CD]:[\\/]/i.test(arg));
@@ -107,6 +124,22 @@
     return evidence;
   }
   function historyEvidence(lesson, history) { return history.reduce((result,entry)=>observe(lesson,entry,result),emptyEvidence(lesson)); }
+  function pipelineProgress(pipeline, history, completed) {
+    const alternatives=Array.isArray(pipeline)?[pipeline]:pipeline.anyOf;
+    let best={alternative:0,count:0,complete:false};
+    alternatives.forEach((steps,alternative)=>{
+      for(const entry of history)for(let start=0;start<(entry.trace||[]).length;start++){
+        let count=0;
+        while(count<steps.length && entry.trace[start+count] &&
+          matches(steps[count],entry.trace[start+count],completed?entry.code:entry.trace[start+count].code))count++;
+        const complete=count===steps.length;
+        if((completed && complete && !best.complete) ||
+          (!(completed && best.complete && !complete) && count>best.count))best={alternative,count,complete};
+      }
+    });
+    const steps=alternatives[best.alternative];
+    return {alternative:best.alternative,stages:steps.map((_,i)=>completed || i<best.count)};
+  }
   function grade(lesson, session, answer, savedEvidence) {
     const checks = lesson.verify || {};
     const collected = historyEvidence(lesson,session.history || []);
@@ -145,7 +178,8 @@
     });
     const commandOk = commands.every(Boolean) && pipelines.every(Boolean) && cwd && files.every(Boolean) && ordered && stateOk;
     const answerOk = !lesson.question || answer === lesson.question.answer;
-    return { ok: commandOk && answerOk, commandOk, answerOk, commands, pipelines, cwd, files, ordered, stateOk };
+    return { ok: commandOk && answerOk, commandOk, answerOk, commands, pipelines, cwd, files, ordered, stateOk,
+      orderedCount:collected.ordered,pipelineStages:(checks.pipelines || []).map((pipeline,i)=>pipelineProgress(pipeline,session.history || [],pipelines[i])) };
   }
   function empty() {
     return { schema: 'powershellroom.progress', version: VERSION, language: 'ja', activeId: '', completed: {}, checkpoints: {} };
