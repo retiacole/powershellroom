@@ -108,7 +108,7 @@
     $('home-button').classList.toggle('active', view === 'home'); $('sandbox-button').classList.toggle('active', currentId === 'sandbox' && view === 'workspace');
     $('language-button').textContent = state.language === 'ja' ? 'EN' : '日本語';
     $('language-button').lang = state.language === 'ja' ? 'en' : 'ja';
-    $('language-button').setAttribute('aria-label', state.language === 'ja' ? 'Switch to English' : '日本語に切り替える');
+    $('language-button').setAttribute('aria-label', state.language === 'ja' ? 'EN — Switch to English' : '日本語に切り替える');
     $('footer').textContent = `powershellroom ${Data.version}  ·  ${t('footer')}`;
   }
   function progressBar(count = progressCount(), total = Data.lessons.length) {
@@ -122,6 +122,7 @@
     historyCursor = -1; feedback = null; courseOpen = false; courseSearch = '';
     render(); save(); window.scrollTo(0, 0);
     if (focus) $('command-input').focus({ preventScroll: true });
+    else { const heading=$('main').querySelector('h1');if(heading){heading.tabIndex=-1;heading.focus({preventScroll:true});} }
   }
   function homeHTML() {
     const resume = state.activeId && state.activeId !== 'sandbox' ? state.activeId : Data.lessons.find(l => !state.completed[l.id])?.id || Data.lessons[0].id;
