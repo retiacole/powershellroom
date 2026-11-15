@@ -1,0 +1,32 @@
+name: 不具合の報告 / Bug report
+description: 入力・表示・採点・保存などの問題を報告する / Report a problem with the course.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        日本語・英語どちらでも投稿できます。投稿内容は公開されます。会社の機密情報や個人情報は含めないでください。
+        You can write in Japanese or English. Posts are public; do not include confidential or personal information.
+  - type: input
+    id: lesson
+    attributes:
+      label: 演習名・場所（任意） / Lesson or location (optional)
+      description: 分かれば、教材のバージョン・演習名・表示言語を記載してください。 / Include the course version, lesson name, and language if known.
+  - type: textarea
+    id: problem
+    attributes:
+      label: 起きたこと / What happened
+      description: 実際の結果と、期待していた結果を教えてください。 / Describe the actual result and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 再現する手順 / Steps to reproduce
+      description: 押したボタンや入力したコマンドを、分かる範囲で順に記載してください。 / List the buttons clicked or commands entered, as far as you remember.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: 利用環境（任意） / Environment (optional)
+      description: OS、ブラウザー、Web版か保存したHTMLかを教えてください。 / Include your OS, browser, and whether you used the website or a saved HTML file.

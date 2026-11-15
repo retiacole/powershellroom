@@ -1,0 +1,20 @@
+name: 質問・改善提案 / Question or suggestion
+description: 分からないところや改善案を相談する / Ask a question or suggest an improvement.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        日本語・英語どちらでも投稿できます。投稿内容は公開されます。会社の機密情報や個人情報は含めないでください。
+        You can write in Japanese or English. Posts are public; do not include confidential or personal information.
+  - type: input
+    id: lesson
+    attributes:
+      label: 演習名・場所（任意） / Lesson or location (optional)
+      description: 分かれば、教材のバージョンや演習名を記載してください。 / Include the course version or lesson name if known.
+  - type: textarea
+    id: question
+    attributes:
+      label: 質問・改善提案 / Question or suggestion
+      description: どこが分かりにくいか、何を知りたいかを教えてください。 / Tell us what is unclear or what you would like to improve.
+    validations:
+      required: true

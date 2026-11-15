@@ -135,6 +135,12 @@ npm run test:browser
 - [Microsoft Learn — Invoke-WebRequest](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/invoke-webrequest)
 - [Microsoft Learn — Windows PowerShell 5.1 と PowerShell 7 の違い](https://learn.microsoft.com/en-us/powershell/scripting/whats-new/differences-from-windows-powershell)
 
+## 質問・不具合の報告
+
+[**質問・不具合を報告する**](https://github.com/retiacole/powershellroom/issues/new/choose)
+
+教材で分かりにくかった点や改善案、動作の問題はGitHub Issuesへお寄せください。リンク先で「質問・改善提案」または「不具合の報告」を選べます。日本語・英語どちらでも受け付けています。投稿にはGitHubアカウントが必要で、内容は公開されます。会社の機密情報や個人情報は含めないでください。
+
 ## English
 
 [**Play Now**](https://retiacole.github.io/powershellroom/) in your browser, or download the HTML for offline practice.
@@ -154,5 +160,11 @@ The simulator supports single-condition filters, property projection in `ForEach
 Process `Name` aliases `ProcessName`, and `WS` aliases `WorkingSet64`. The default process `Format-List` view shows Id, Handles, CPU, SI, and Name; `Format-List *` shows all simulated properties. `Stop-Process` accepts an ID, name, or pipeline input, while changes remain limited to the practice NotesApp. A name can match multiple running instances on a real machine.
 
 The practice PC contains 14 processes, 15 services, and 12 System events, including processes with duplicate names and distinct IDs. File listings include LastWriteTime. Unique parameter prefixes, positional event-log and text-search arguments, and Test-Connection -ComputerName are supported. Following normal PowerShell 7.3+ behavior, Measure-Object skips items lacking the requested property; StrictMode is not simulated.
+
+### Questions and feedback
+
+[**Ask a question or report a problem**](https://github.com/retiacole/powershellroom/issues/new/choose)
+
+Use GitHub Issues for questions, suggestions, or problems with the course. Choose “Question or suggestion” or “Bug report” on the next page. Japanese and English are welcome. Posting requires a GitHub account, and posts are public. Please leave out confidential or personal information.
 
 MIT License. See [LICENSE](LICENSE). The original windowsCLIroom copyright notice is retained.
